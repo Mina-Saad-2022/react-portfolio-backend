@@ -3,222 +3,109 @@
 // ============================================================
 import express from 'express';
 import db from '../../config/db.js';
-import multer from 'multer';
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const router = express.Router();
 
-// ✅ إعداد رفع الصور
-const uploadsDir = path.join(__dirname, '../../uploads/projects');
-if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+// ✅ جلب المشاريع
+router.get('/', async (req, res) => {
+  try {
+    const query = 'SELECT * FROM projects ORDER BY id DESC';
+    const [results] = await db.query(query);
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadsDir),
-  filename: (req, file, cb) => {
-    const unique = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, unique + '-' + file.originalname);
-  }
-});
-
-const upload = multer({ storage });
-
-// ✅ جلب جميع المشاريع
-router.get('/', (req, res) => {
-  const query = 'SELECT * FROM projects ORDER BY id DESC';
-  
-  db.query(query, (err, results) => {
-    if (err) {
-      console.error('❌ Error fetching projects:', err);
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to fetch projects'
-      });
-    }
-    
-    // ✅ إضافة الرابط الكامل للصورة
-    const data = results.map(project => ({
-      ...project,
-      image_url: project.image 
-        ? `http://localhost:5000/dashboard/assets/images/projects/${project.image}`
-        : null
-    }));
-    
-    res.json({
+    return res.json({
       success: true,
-      data: data
+      data: results,
     });
-  });
-});
-
-// ✅ إضافة مشروع جديد
-router.post('/', upload.single('image'), (req, res) => {
-  const { title, description, link, technologies } = req.body;
-  
-  if (!title || !title.trim()) {
-    return res.status(400).json({
+  } catch (err) {
+    console.error('❌ Error fetching projects:', err);
+    return res.status(500).json({
       success: false,
-      message: 'Title is required'
+      message: 'Failed to fetch projects',
+      error: err.message,
     });
   }
-  
-  const image = req.file ? req.file.filename : null;
-  
-  const query = `
-    INSERT INTO projects (title, description, image, link, technologies)
-    VALUES (?, ?, ?, ?, ?)
-  `;
-  
-  const values = [
-    title.trim(),
-    description || '',
-    image,
-    link || '',
-    technologies || ''
-  ];
-  
-  db.query(query, values, (err, result) => {
-    if (err) {
-      console.error('❌ Error creating project:', err);
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to create project'
-      });
-    }
-    
-    res.json({
+});
+
+// ✅ إضافة مشروع
+router.post('/', async (req, res) => {
+  const { title, description, image, category, demo_link, repo_link } = req.body;
+
+  try {
+    const query = 'INSERT INTO projects (title, description, image, category, demo_link, repo_link) VALUES (?, ?, ?, ?, ?, ?)';
+    const [result] = await db.query(query, [title, description, image, category, demo_link, repo_link]);
+
+    return res.json({
       success: true,
-      message: '✅ Project created successfully',
-      data: { id: result.insertId }
+      message: '✅ Project added successfully',
+      data: { id: result.insertId },
     });
-  });
+  } catch (err) {
+    console.error('❌ Error creating project:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to create project',
+      error: err.message,
+    });
+  }
 });
 
 // ✅ تحديث مشروع
-router.put('/:id', upload.single('image'), (req, res) => {
+router.put('/:id', async (req, res) => {
   const { id } = req.params;
-  const { title, description, link, technologies } = req.body;
-  
-  if (!title || !title.trim()) {
-    return res.status(400).json({
-      success: false,
-      message: 'Title is required'
-    });
-  }
-  
-  // ✅ جلب الصورة القديمة
-  const selectQuery = 'SELECT image FROM projects WHERE id = ?';
-  db.query(selectQuery, [id], (err, results) => {
-    if (err) {
-      console.error('❌ Error fetching project:', err);
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to fetch project'
-      });
-    }
-    
-    if (results.length === 0) {
+  const { title, description, image, category, demo_link, repo_link } = req.body;
+
+  try {
+    const query = 'UPDATE projects SET title = ?, description = ?, image = ?, category = ?, demo_link = ?, repo_link = ? WHERE id = ?';
+    const [result] = await db.query(query, [title, description, image, category, demo_link, repo_link, id]);
+
+    if (result.affectedRows === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Project not found'
+        message: 'Project not found',
       });
     }
-    
-    const oldImage = results[0].image;
-    const newImage = req.file ? req.file.filename : oldImage;
-    
-    // ✅ حذف الصورة القديمة لو تم رفع صورة جديدة
-    if (req.file && oldImage) {
-      const oldPath = path.join(uploadsDir, oldImage);
-      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-    }
-    
-    const query = `
-      UPDATE projects SET
-        title = ?,
-        description = ?,
-        image = ?,
-        link = ?,
-        technologies = ?
-      WHERE id = ?
-    `;
-    
-    const values = [
-      title.trim(),
-      description || '',
-      newImage,
-      link || '',
-      technologies || '',
-      id
-    ];
-    
-    db.query(query, values, (err, result) => {
-      if (err) {
-        console.error('❌ Error updating project:', err);
-        return res.status(500).json({
-          success: false,
-          message: 'Failed to update project'
-        });
-      }
-      
-      res.json({
-        success: true,
-        message: '✅ Project updated successfully'
-      });
+
+    return res.json({
+      success: true,
+      message: '✅ Project updated successfully',
     });
-  });
+  } catch (err) {
+    console.error('❌ Error updating project:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update project',
+      error: err.message,
+    });
+  }
 });
 
 // ✅ حذف مشروع
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   const { id } = req.params;
-  
-  // ✅ جلب الصورة لحذفها
-  const selectQuery = 'SELECT image FROM projects WHERE id = ?';
-  db.query(selectQuery, [id], (err, results) => {
-    if (err) {
-      console.error('❌ Error fetching project:', err);
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to fetch project'
-      });
-    }
-    
-    if (results.length === 0) {
+
+  try {
+    const query = 'DELETE FROM projects WHERE id = ?';
+    const [result] = await db.query(query, [id]);
+
+    if (result.affectedRows === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Project not found'
+        message: 'Project not found',
       });
     }
-    
-    const image = results[0].image;
-    
-    // ✅ حذف الصورة من السيرفر
-    if (image) {
-      const imagePath = path.join(uploadsDir, image);
-      if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
-    }
-    
-    const query = 'DELETE FROM projects WHERE id = ?';
-    db.query(query, [id], (err, result) => {
-      if (err) {
-        console.error('❌ Error deleting project:', err);
-        return res.status(500).json({
-          success: false,
-          message: 'Failed to delete project'
-        });
-      }
-      
-      res.json({
-        success: true,
-        message: '✅ Project deleted successfully'
-      });
+
+    return res.json({
+      success: true,
+      message: '✅ Project deleted successfully',
     });
-  });
+  } catch (err) {
+    console.error('❌ Error deleting project:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to delete project',
+      error: err.message,
+    });
+  }
 });
 
 export default router;

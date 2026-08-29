@@ -1,74 +1,80 @@
 // ============================================================
-// 📁 backend/routes/dashboard/experiences.js
+// 📁 backend/routes/dashboard/information.js
 // ============================================================
 import express from 'express';
 import db from '../../config/db.js';
 
 const router = express.Router();
 
-router.get('/', (req, res) => {
-  const query = 'SELECT * FROM experiences ORDER BY id DESC';
-  
-  db.query(query, (err, results) => {
-    if (err) {
-      console.error('❌ Error:', err);
-      return res.status(500).json({ success: false, message: 'Failed to fetch' });
-    }
-    res.json({ success: true, data: results });
-  });
-});
+// ✅ جلب البيانات المعرفية الشخصية
+router.get('/', async (req, res) => {
+  try {
+    const query = 'SELECT * FROM information LIMIT 1';
+    const [results] = await db.query(query);
 
-router.post('/', (req, res) => {
-  const { title, description } = req.body;
-  
-  if (!title || !title.trim()) {
-    return res.status(400).json({ success: false, message: 'Title is required' });
+    return res.json({
+      success: true,
+      data: results[0] || null,
+    });
+  } catch (err) {
+    console.error('❌ Error fetching information:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch information',
+      error: err.message,
+    });
   }
-  
-  const query = 'INSERT INTO experiences (title, description) VALUES (?, ?)';
-  db.query(query, [title.trim(), description || ''], (err, result) => {
-    if (err) {
-      console.error('❌ Error:', err);
-      return res.status(500).json({ success: false, message: 'Failed to create' });
-    }
-    res.json({ success: true, message: '✅ Created', data: { id: result.insertId } });
-  });
 });
 
-router.put('/:id', (req, res) => {
-  const { id } = req.params;
-  const { title, description } = req.body;
-  
-  if (!title || !title.trim()) {
-    return res.status(400).json({ success: false, message: 'Title is required' });
+// ✅ تحديث البيانات المعرفية الكاملة
+router.put('/', async (req, res) => {
+  const data = req.body;
+
+  try {
+    const query = 'UPDATE information SET ? WHERE id = 1';
+    await db.query(query, [data]);
+
+    return res.json({
+      success: true,
+      message: '✅ Information updated successfully',
+    });
+  } catch (err) {
+    console.error('❌ Error updating information:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update information',
+      error: err.message,
+    });
   }
-  
-  const query = 'UPDATE experiences SET title = ?, description = ? WHERE id = ?';
-  db.query(query, [title.trim(), description || '', id], (err, result) => {
-    if (err) {
-      console.error('❌ Error:', err);
-      return res.status(500).json({ success: false, message: 'Failed to update' });
-    }
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ success: false, message: 'Not found' });
-    }
-    res.json({ success: true, message: '✅ Updated' });
-  });
 });
 
-router.delete('/:id', (req, res) => {
-  const { id } = req.params;
-  const query = 'DELETE FROM experiences WHERE id = ?';
-  db.query(query, [id], (err, result) => {
-    if (err) {
-      console.error('❌ Error:', err);
-      return res.status(500).json({ success: false, message: 'Failed to delete' });
-    }
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ success: false, message: 'Not found' });
-    }
-    res.json({ success: true, message: '✅ Deleted' });
-  });
+// ✅ تحديث حقل معينة
+router.patch('/field', async (req, res) => {
+  const { field, value } = req.body;
+
+  if (!field) {
+    return res.status(400).json({
+      success: false,
+      message: 'Field name is required',
+    });
+  }
+
+  try {
+    const query = `UPDATE information SET \`${field}\` = ? WHERE id = 1`;
+    await db.query(query, [value]);
+
+    return res.json({
+      success: true,
+      message: `✅ Field ${field} updated successfully`,
+    });
+  } catch (err) {
+    console.error('❌ Error updating field:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update field',
+      error: err.message,
+    });
+  }
 });
 
 export default router;
