@@ -6,15 +6,16 @@ import db from '../../config/db.js';
 
 const router = express.Router();
 
-// ✅ جلب البيانات المعرفية الشخصية
+// ✅ جلب البيانات المعرفية الشخصية (GET /api/information)
 router.get('/', async (req, res) => {
   try {
     const query = 'SELECT * FROM information LIMIT 1';
     const [results] = await db.query(query);
 
+    // رجّع البيانات مباشرة سواء كانت موجودة أو كائن فاضي
     return res.json({
       success: true,
-      data: results[0] || null,
+      data: results[0] || {}
     });
   } catch (err) {
     console.error('❌ Error fetching information:', err);
@@ -26,7 +27,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// ✅ تحديث البيانات المعرفية الكاملة
+// ✅ تحديث البيانات المعرفية الكاملة (PUT /api/information)
 router.put('/', async (req, res) => {
   const data = req.body;
 
@@ -43,35 +44,6 @@ router.put('/', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to update information',
-      error: err.message,
-    });
-  }
-});
-
-// ✅ تحديث حقل معينة
-router.patch('/field', async (req, res) => {
-  const { field, value } = req.body;
-
-  if (!field) {
-    return res.status(400).json({
-      success: false,
-      message: 'Field name is required',
-    });
-  }
-
-  try {
-    const query = `UPDATE information SET \`${field}\` = ? WHERE id = 1`;
-    await db.query(query, [value]);
-
-    return res.json({
-      success: true,
-      message: `✅ Field ${field} updated successfully`,
-    });
-  } catch (err) {
-    console.error('❌ Error updating field:', err);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to update field',
       error: err.message,
     });
   }
