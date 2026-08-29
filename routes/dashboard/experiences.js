@@ -1,77 +1,115 @@
 // ============================================================
-// 📁 backend/routes/dashboard/information.js
+// 📁 backend/routes/dashboard/experiences.js
 // ============================================================
 import express from 'express';
 import db from '../../config/db.js';
 
 const router = express.Router();
 
-// ✅ جلب البيانات المعرفية الشخصية
+// ✅ 1. جلب كل الخبرات (Get All Experiences)
 router.get('/', async (req, res) => {
   try {
-    const query = 'SELECT * FROM information LIMIT 1';
+    const query = 'SELECT * FROM experiences ORDER BY id DESC';
     const [results] = await db.query(query);
 
     return res.json({
       success: true,
-      data: results[0] || null,
+      data: results,
     });
   } catch (err) {
-    console.error('❌ Error fetching information:', err);
+    console.error('❌ Error fetching experiences:', err);
     return res.status(500).json({
       success: false,
-      message: 'Failed to fetch information',
+      message: 'Failed to fetch experiences',
       error: err.message,
     });
   }
 });
 
-// ✅ تحديث البيانات المعرفية الكاملة
-router.put('/', async (req, res) => {
-  const data = req.body;
+// ✅ 2. إضافة خبرة جديدة (Create Experience)
+router.post('/', async (req, res) => {
+  const { title } = req.body;
 
-  try {
-    const query = 'UPDATE information SET ? WHERE id = 1';
-    await db.query(query, [data]);
-
-    return res.json({
-      success: true,
-      message: '✅ Information updated successfully',
-    });
-  } catch (err) {
-    console.error('❌ Error updating information:', err);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to update information',
-      error: err.message,
-    });
-  }
-});
-
-// ✅ تحديث حقل معينة
-router.patch('/field', async (req, res) => {
-  const { field, value } = req.body;
-
-  if (!field) {
+  if (!title) {
     return res.status(400).json({
       success: false,
-      message: 'Field name is required',
+      message: 'Title is required',
     });
   }
 
   try {
-    const query = `UPDATE information SET \`${field}\` = ? WHERE id = 1`;
-    await db.query(query, [value]);
+    const query = 'INSERT INTO experiences (title) VALUES (?)';
+    const [result] = await db.query(query, [title]);
+
+    return res.status(201).json({
+      success: true,
+      message: '✅ Experience created successfully',
+      data: { id: result.insertId, title },
+    });
+  } catch (err) {
+    console.error('❌ Error creating experience:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to create experience',
+      error: err.message,
+    });
+  }
+});
+
+// ✅ 3. تعديل خبرة بالـ ID (Update Experience)
+router.put('/:id', async (req, res) => {
+  const { id } = req.params;
+  const { title } = req.body;
+
+  try {
+    const query = 'UPDATE experiences SET title = ? WHERE id = ?';
+    const [result] = await db.query(query, [title, id]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Experience not found',
+      });
+    }
 
     return res.json({
       success: true,
-      message: `✅ Field ${field} updated successfully`,
+      message: '✅ Experience updated successfully',
     });
   } catch (err) {
-    console.error('❌ Error updating field:', err);
+    console.error('❌ Error updating experience:', err);
     return res.status(500).json({
       success: false,
-      message: 'Failed to update field',
+      message: 'Failed to update experience',
+      error: err.message,
+    });
+  }
+});
+
+// ✅ 4. حذف خبرة بالـ ID (Delete Experience)
+router.delete('/:id', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const query = 'DELETE FROM experiences WHERE id = ?';
+    const [result] = await db.query(query, [id]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Experience not found',
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: '✅ Experience deleted successfully',
+    });
+  } catch (err) {
+    console.error('❌ Error deleting experience:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to delete experience',
       error: err.message,
     });
   }
