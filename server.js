@@ -1,12 +1,16 @@
 // ============================================================
-// 📁 backend/server.js
+// 📁 C:\laragon\www\react-portfolio-backend\server.js
 // ============================================================
 import express from "express";
 import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
+import dotenv from "dotenv";
 
-// ✅ استيراد Routes
+// ✅ تحميل متغيرات البيئة
+dotenv.config();
+
+// ✅ استيراد الـ Routes
 import informationRoutes from "./routes/dashboard/information.js";
 import tasksRoutes from "./routes/dashboard/tasks.js";
 import worksRoutes from "./routes/dashboard/works.js";
@@ -20,11 +24,19 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-app.use(cors());
+// ✅ إعداد الـ CORS السماح الكامل للفرونت إند من Vercel أو المحلي
+app.use(
+  cors({
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ✅ خدمة الملفات الثابتة
+// ✅ خدمة الملفات الثابتة (Uploads)
 app.use(
   "/dashboard/assets/images/information",
   express.static(path.join(__dirname, "uploads/images"))
@@ -38,7 +50,12 @@ app.use(
   express.static(path.join(__dirname, "uploads/projects"))
 );
 
-// ✅ استخدام Routes
+// ✅ مسار فحص حالة السيرفر (Health Check)
+app.get("/", (req, res) => {
+  res.status(200).json({ status: "success", message: "Backend Server is Running!" });
+});
+
+// ✅ تسجيل الـ Routes الخاصة بالـ API
 app.use("/api/information", informationRoutes);
 app.use("/api/tasks", tasksRoutes);
 app.use("/api/works", worksRoutes);
@@ -47,16 +64,13 @@ app.use("/api/skills/backend", skillsBackendRoutes);
 app.use("/api/experiences", experiencesRoutes);
 app.use("/api/projects", projectsRoutes);
 
-// ✅ تشغيل السيرفر محلياً فقط لو مش على بيئة الإنتاج (Vercel Production)
+// ✅ تشغيل السيرفر محلياً فقط في حالة التطوير (Local Development)
 if (process.env.NODE_ENV !== "production") {
   const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => {
-    console.log(`🚀 السيرفر شغال على http://localhost:${PORT}`);
-    console.log(`📁 Images: ${path.join(__dirname, "uploads/images")}`);
-    console.log(`📁 PDF: ${path.join(__dirname, "uploads/pdf")}`);
-    console.log(`📁 Projects: ${path.join(__dirname, "uploads/projects")}`);
+    console.log(`🚀 السيرفر شغال محلياً على: http://localhost:${PORT}`);
   });
 }
 
-// ✅ تصدير app لتتمكن Vercel Serverless Functions من تشغيله
+// ✅ تصدير التطبيق لتشغيله على Vercel Serverless Functions
 export default app;
