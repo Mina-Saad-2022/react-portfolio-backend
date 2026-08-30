@@ -1,69 +1,42 @@
 // ============================================================
-// 📁 backend/routes/dashboard/projects.js
+// 📁 backend/routes/dashboard/projects.js (أو الملف المقابل له)
 // ============================================================
 import express from 'express';
+import multer from 'multer';
+import path from 'path';
 import db from '../../config/db.js';
 
 const router = express.Router();
 
-// ✅ جلب المشاريع
-router.get('/', async (req, res) => {
-  try {
-    const query = 'SELECT * FROM projects ORDER BY id DESC';
-    const [results] = await db.query(query);
-
-    return res.json({
-      success: true,
-      data: results,
-    });
-  } catch (err) {
-    console.error('❌ Error fetching projects:', err);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to fetch projects',
-      error: err.message,
-    });
-  }
+// ⚙️ إعداد Multer لتخزين صور المشاريع
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'public/uploads/projects');
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, 'project-' + uniqueSuffix + path.extname(file.originalname));
+  },
 });
 
-// ✅ إضافة مشروع
-router.post('/', async (req, res) => {
-  const { title, description, image, category, demo_link, repo_link } = req.body;
+const upload = multer({ storage });
 
+// ✅ تحديث مشروع بالصورة (PUT /api/projects/:id)
+router.put('/:id', upload.single('image'), async (req, res) => {
   try {
-    const query = 'INSERT INTO projects (title, description, image, category, demo_link, repo_link) VALUES (?, ?, ?, ?, ?, ?)';
-    const [result] = await db.query(query, [title, description, image, category, demo_link, repo_link]);
+    const { id } = req.params;
+    const { title, description, link, technologies, status } = req.body;
 
-    return res.json({
-      success: true,
-      message: '✅ Project added successfully',
-      data: { id: result.insertId },
-    });
-  } catch (err) {
-    console.error('❌ Error creating project:', err);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to create project',
-      error: err.message,
-    });
-  }
-});
+    // تجهيز الحقول للتحديث
+    let updateFields = { title, description, link, technologies, status };
 
-// ✅ تحديث مشروع
-router.put('/:id', async (req, res) => {
-  const { id } = req.params;
-  const { title, description, image, category, demo_link, repo_link } = req.body;
-
-  try {
-    const query = 'UPDATE projects SET title = ?, description = ?, image = ?, category = ?, demo_link = ?, repo_link = ? WHERE id = ?';
-    const [result] = await db.query(query, [title, description, image, category, demo_link, repo_link, id]);
-
-    if (result.affectedRows === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Project not found',
-      });
+    // لو اترُفعت صورة جديدة نحدث مسار الصورة
+    if (req.file) {
+      updateFields.image = `/uploads/projects/${req.file.filename}`;
     }
+
+    const query = 'UPDATE projects SET ? WHERE id = ?';
+    await db.query(query, [updateFields, id]);
 
     return res.json({
       success: true,
@@ -73,36 +46,7 @@ router.put('/:id', async (req, res) => {
     console.error('❌ Error updating project:', err);
     return res.status(500).json({
       success: false,
-      message: 'Failed to update project',
-      error: err.message,
-    });
-  }
-});
-
-// ✅ حذف مشروع
-router.delete('/:id', async (req, res) => {
-  const { id } = req.params;
-
-  try {
-    const query = 'DELETE FROM projects WHERE id = ?';
-    const [result] = await db.query(query, [id]);
-
-    if (result.affectedRows === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Project not found',
-      });
-    }
-
-    return res.json({
-      success: true,
-      message: '✅ Project deleted successfully',
-    });
-  } catch (err) {
-    console.error('❌ Error deleting project:', err);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to delete project',
+      message: 'Server error updating project',
       error: err.message,
     });
   }
