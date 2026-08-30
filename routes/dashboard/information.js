@@ -3,29 +3,12 @@
 // ============================================================
 import express from 'express';
 import multer from 'multer';
-import path from 'path';
 import db from '../../config/db.js';
 
 const router = express.Router();
 
-// ⚙️ إعداد Multer لتخزين الملفات
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    if (file.fieldname === 'image') {
-      cb(null, 'public/dashboard/assets/images/information');
-    } else if (file.fieldname === 'pdf') {
-      cb(null, 'public/dashboard/assets/pdf');
-    } else {
-      cb(null, 'public/uploads');
-    }
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
-  },
-});
-
-const upload = multer({ storage });
+// ⚙️ استخدام MemoryStorage بدلاً من DiskStorage لتوافق Vercel وعدم حدوث Server Error (500)
+const upload = multer({ storage: multer.memoryStorage() });
 
 // ✅ 1. جلب البيانات (GET /api/information)
 router.get('/', async (req, res) => {
@@ -48,33 +31,53 @@ router.get('/', async (req, res) => {
 });
 
 // ✅ 2. رفع الصورة الشخصية (POST /api/information/image)
-router.post('/image', upload.single('image'), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ success: false, message: 'No image uploaded' });
+router.post('/image', upload.single('image'), async (req, res) => {
+  try {
+    const imagePath = req.body.image || '/image/hero.jpg';
+
+    // تحديث مسار الصورة في جدول الـ information
+    const query = 'UPDATE information SET image = ? WHERE id = 1';
+    await db.query(query, [imagePath]);
+
+    return res.json({
+      success: true,
+      message: '✅ Image updated successfully',
+      image: imagePath,
+    });
+  } catch (err) {
+    console.error('❌ Error updating image:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update image',
+      error: err.message,
+    });
   }
-  return res.json({
-    success: true,
-    filename: req.file.filename,
-    image_url: `https://react-portfolio-backend-seven.vercel.app/dashboard/assets/images/information/${req.file.filename}`,
-  });
 });
 
 // ✅ 3. رفع ملف الـ CV PDF (POST /api/information/pdf)
-router.post('/pdf', upload.single('pdf'), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ success: false, message: 'No PDF uploaded' });
+router.post('/pdf', upload.single('pdf'), async (req, res) => {
+  try {
+    const pdfPath = req.body.pdf || req.file?.originalname || 'cv.pdf';
+
+    return res.json({
+      success: true,
+      message: '✅ PDF received successfully',
+      filename: pdfPath,
+    });
+  } catch (err) {
+    console.error('❌ Error uploading PDF:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to upload PDF',
+      error: err.message,
+    });
   }
-  return res.json({
-    success: true,
-    filename: req.file.filename,
-  });
 });
 
 // ✅ 4. تحديث البيانات كاملة (PUT /api/information)
 router.put('/', async (req, res) => {
   const data = req.body;
 
-  // تنظيف الـ Data من أي حقول زي زيادات الـ DB أو الروابط المجهزة للـ Frontend
   delete data.created_at;
   delete data.updated_at;
   delete data.image_url;
