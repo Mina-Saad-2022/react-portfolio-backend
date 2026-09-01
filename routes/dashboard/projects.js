@@ -1,5 +1,5 @@
 // ============================================================
-// 📁 backend/routes/dashboard/projects.js
+// 📁 routes/dashboard/projects.js
 // ============================================================
 import express from "express";
 import multer from "multer";
@@ -8,40 +8,40 @@ import db from "../../config/db.js";
 
 const router = express.Router();
 
-// ⚙️ إعداد Multer في الذاكرة لتنسجم مع Vercel Serverless Functions
+// ⚙️ إعداد Multer في الذاكرة
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
-// ⚙️ إعداد Cloudinary (يقرأ تلقائياً من ملف الـ .env)
+// ⚙️ إعداد Cloudinary
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// 🛠️ دالة مساعدة لاستخراج public_id من رابط Cloudinary لحيذفه
+// 🛠️ استخراج public_id بأمان آمن لمنع السيرفر من الانهيار
 const getPublicIdFromUrl = (url) => {
-  if (!url || !url.includes("cloudinary.com")) return null;
+  if (!url || typeof url !== "string" || !url.includes("cloudinary.com"))
+    return null;
   try {
     const parts = url.split("/");
     const uploadIndex = parts.indexOf("upload");
     if (uploadIndex === -1) return null;
 
-    // تجاهل أرقام الـ Version مثل v1788301257 لو كانت موجودة
-    const relevantParts = parts.slice(uploadIndex + 1);
-    if (relevantParts[0] && relevantParts[0].startsWith("v")) {
+    let relevantParts = parts.slice(uploadIndex + 1);
+    if (relevantParts[0] && /^v\d+$/.test(relevantParts[0])) {
       relevantParts.shift();
     }
 
-    const filePath = relevantParts.join("/");
-    return filePath.substring(0, filePath.lastIndexOf("."));
+    const fullPath = relevantParts.join("/");
+    return fullPath.substring(0, fullPath.lastIndexOf("."));
   } catch (err) {
-    console.error("Error parsing public_id:", err);
+    console.error("⚠️ Error parsing public_id:", err);
     return null;
   }
 };
 
-// 🛠️ دالة رفـع الملف المباشر إلى Cloudinary عبر الـ Buffer
+// 🛠️ رفع الملف لـ Cloudinary مع Promise ومعالجة أخطاء الـ Buffer
 const uploadToCloudinary = (fileBuffer) => {
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
@@ -64,7 +64,6 @@ router.get("/", async (req, res) => {
     const query = "SELECT * FROM projects ORDER BY id DESC";
     const [results] = await db.query(query);
 
-    // إضافة image_url لتسهيل القراءة في الـ Frontend
     const formattedResults = results.map((project) => ({
       ...project,
       image_url: project.image || null,
@@ -96,7 +95,7 @@ router.post("/", upload.single("image"), async (req, res) => {
     }
 
     const insertData = {
-      title,
+      title: title || "",
       description: description || "",
       link: link || "",
       technologies: technologies || "",
@@ -128,7 +127,6 @@ router.put("/:id", upload.single("image"), async (req, res) => {
     const { id } = req.params;
     const { title, description, link, technologies, status } = req.body;
 
-    // جلب بيانات المشروع القديم لمعرفة رابط الصورة السابقة
     const [existing] = await db.query("SELECT * FROM projects WHERE id = ?", [
       id,
     ]);
@@ -149,20 +147,31 @@ router.put("/:id", upload.single("image"), async (req, res) => {
       status: status !== undefined ? status : oldProject.status,
     };
 
-    // لو تم رفع صورة جديدة
+    // لو تم إرفاق صورة جديدة
     if (req.file) {
-      // 1. رفع الصورة الجديدة إلى Cloudinary
-      const uploadResult = await uploadToCloudinary(req.file.buffer);
-      updateData.image = uploadResult.secure_url;
+      try {
+        const uploadResult = await uploadToCloudinary(req.file.buffer);
+        updateData.image = uploadResult.secure_url;
 
-      // 2. حذف الصورة القديمة من Cloudinary لمنع استهلاك المساحة
-      if (oldProject.image) {
-        const publicId = getPublicIdFromUrl(oldProject.image);
-        if (publicId) {
-          await cloudinary.uploader.destroy(publicId).catch((err) => {
-            console.error("⚠️ Could not delete old Cloudinary image:", err);
-          });
+        // محاولة حذف الصورة القديمة بأمان بدون إيقاف الطلب لو فشلت
+        if (oldProject.image) {
+          const publicId = getPublicIdFromUrl(oldProject.image);
+          if (publicId) {
+            cloudinary.uploader.destroy(publicId).catch((err) => {
+              console.error(
+                "⚠️ Failed to delete old image from Cloudinary:",
+                err,
+              );
+            });
+          }
         }
+      } catch (uploadErr) {
+        console.error("❌ Cloudinary Upload Error:", uploadErr);
+        return res.status(500).json({
+          success: false,
+          message: "Failed to upload new image to Cloudinary",
+          error: uploadErr.message,
+        });
       }
     }
 
@@ -195,11 +204,8 @@ router.delete("/:id", async (req, res) => {
     if (existing && existing.length > 0 && existing[0].image) {
       const publicId = getPublicIdFromUrl(existing[0].image);
       if (publicId) {
-        await cloudinary.uploader.destroy(publicId).catch((err) => {
-          console.error(
-            "⚠️ Could not delete Cloudinary image on project delete:",
-            err,
-          );
+        cloudinary.uploader.destroy(publicId).catch((err) => {
+          console.error("⚠️ Could not delete Cloudinary image:", err);
         });
       }
     }
