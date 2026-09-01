@@ -19,32 +19,56 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// 🛠️ استخراج public_id بأمان آمن لمنع السيرفر من الانهيار
-const getPublicIdFromUrl = (url) => {
+// 🛠️ استخراج public_id بدقة عالية جداً لحذف الصور من Cloudinary
+const extractPublicId = (url) => {
   if (!url || typeof url !== "string" || !url.includes("cloudinary.com"))
     return null;
   try {
-    const parts = url.split("/");
-    const uploadIndex = parts.indexOf("upload");
-    if (uploadIndex === -1) return null;
+    const parts = url.split("/upload/");
+    if (parts.length < 2) return null;
 
-    let relevantParts = parts.slice(uploadIndex + 1);
-    if (relevantParts[0] && /^v\d+$/.test(relevantParts[0])) {
-      relevantParts.shift();
+    // الجزء بعد كلمة upload/
+    let publicIdWithExt = parts[1];
+
+    // إزالة رقم الإصدار v12345678/ لو موجود
+    if (publicIdWithExt.startsWith("v")) {
+      publicIdWithExt = publicIdWithExt.replace(/^v\d+\//, "");
     }
 
-    const fullPath = relevantParts.join("/");
-    return fullPath.substring(0, fullPath.lastIndexOf("."));
+    // إزالة امتداد الملف (.png, .jpg, إلخ)
+    const lastDotIndex = publicIdWithExt.lastIndexOf(".");
+    if (lastDotIndex !== -1) {
+      return publicIdWithExt.substring(0, lastDotIndex);
+    }
+    return publicIdWithExt;
   } catch (err) {
-    console.error("⚠️ Error parsing public_id:", err);
+    console.error("⚠️ Error extracting public_id:", err);
     return null;
   }
 };
 
-// 🛠️ رفع الملف لـ Cloudinary مع Promise ومعالجة أخطاء الـ Buffer
+// 🛠️ دالة الحذف المباشرة والمضمونة من Cloudinary
+const deleteFromCloudinary = async (imageUrl) => {
+  const publicId = extractPublicId(imageUrl);
+  if (publicId) {
+    try {
+      const result = await cloudinary.uploader.destroy(publicId);
+      console.log(`🗑️ Cloudinary Delete Result for [${publicId}]:`, result);
+      return result;
+    } catch (err) {
+      console.error(
+        `❌ Failed to delete image [${publicId}] from Cloudinary:`,
+        err,
+      );
+    }
+  }
+  return null;
+};
+
+// 🛠️ رفع الملف لـ Cloudinary باستخدام Promise
 const uploadToCloudinary = (fileBuffer) => {
   return new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
+    const uploadStream = cloudinary.uploader.upload_stream(
       {
         folder: "portfolio_uploads/projects",
         resource_type: "image",
@@ -54,7 +78,7 @@ const uploadToCloudinary = (fileBuffer) => {
         resolve(result);
       },
     );
-    stream.end(fileBuffer);
+    uploadStream.end(fileBuffer);
   });
 };
 
@@ -127,6 +151,7 @@ router.put("/:id", upload.single("image"), async (req, res) => {
     const { id } = req.params;
     const { title, description, link, technologies, status } = req.body;
 
+    // 1. التأكد من وجود المشروع وجلب بياناته القديمة
     const [existing] = await db.query("SELECT * FROM projects WHERE id = ?", [
       id,
     ]);
@@ -137,50 +162,46 @@ router.put("/:id", upload.single("image"), async (req, res) => {
     }
 
     const oldProject = existing[0];
-    let updateData = {
-      title: title !== undefined ? title : oldProject.title,
+
+    // تجهيز حقول التحديث الآمنة (عدم السماح بقيم undefined)
+    let updateFields = {
+      title:
+        title !== undefined && title !== "undefined" ? title : oldProject.title,
       description:
-        description !== undefined ? description : oldProject.description,
-      link: link !== undefined ? link : oldProject.link,
+        description !== undefined && description !== "undefined"
+          ? description
+          : oldProject.description,
+      link: link !== undefined && link !== "undefined" ? link : oldProject.link,
       technologies:
-        technologies !== undefined ? technologies : oldProject.technologies,
-      status: status !== undefined ? status : oldProject.status,
+        technologies !== undefined && technologies !== "undefined"
+          ? technologies
+          : oldProject.technologies,
+      status:
+        status !== undefined && status !== "undefined"
+          ? status
+          : oldProject.status,
     };
 
-    // لو تم إرفاق صورة جديدة
+    // 2. إذا تم رفع صورة جديدة
     if (req.file) {
-      try {
-        const uploadResult = await uploadToCloudinary(req.file.buffer);
-        updateData.image = uploadResult.secure_url;
+      // أ) رفع الصورة الجديدة لـ Cloudinary أولاً
+      const uploadResult = await uploadToCloudinary(req.file.buffer);
+      updateFields.image = uploadResult.secure_url;
 
-        // محاولة حذف الصورة القديمة بأمان بدون إيقاف الطلب لو فشلت
-        if (oldProject.image) {
-          const publicId = getPublicIdFromUrl(oldProject.image);
-          if (publicId) {
-            cloudinary.uploader.destroy(publicId).catch((err) => {
-              console.error(
-                "⚠️ Failed to delete old image from Cloudinary:",
-                err,
-              );
-            });
-          }
-        }
-      } catch (uploadErr) {
-        console.error("❌ Cloudinary Upload Error:", uploadErr);
-        return res.status(500).json({
-          success: false,
-          message: "Failed to upload new image to Cloudinary",
-          error: uploadErr.message,
-        });
+      // ب) مسح الصورة القديمة من Cloudinary إذا كانت موجودة
+      if (oldProject.image) {
+        await deleteFromCloudinary(oldProject.image);
       }
     }
 
+    // 3. تحديث قاعدة البيانات
     const query = "UPDATE projects SET ? WHERE id = ?";
-    await db.query(query, [updateData, id]);
+    await db.query(query, [updateFields, id]);
 
     return res.json({
       success: true,
       message: "✅ Project updated successfully",
+      data: updateFields,
     });
   } catch (err) {
     console.error("❌ Error updating project:", err);
@@ -202,12 +223,7 @@ router.delete("/:id", async (req, res) => {
       [id],
     );
     if (existing && existing.length > 0 && existing[0].image) {
-      const publicId = getPublicIdFromUrl(existing[0].image);
-      if (publicId) {
-        cloudinary.uploader.destroy(publicId).catch((err) => {
-          console.error("⚠️ Could not delete Cloudinary image:", err);
-        });
-      }
+      await deleteFromCloudinary(existing[0].image);
     }
 
     await db.query("DELETE FROM projects WHERE id = ?", [id]);
