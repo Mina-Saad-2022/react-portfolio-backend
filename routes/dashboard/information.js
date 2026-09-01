@@ -9,14 +9,14 @@ import db from '../../config/db.js';
 
 const router = express.Router();
 
-// ⚙️ إعداد Cloudinary بالمفاتيح الخاصة بك
+// ⚙️ إعداد Cloudinary
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'qnfujvlo',
   api_key: process.env.CLOUDINARY_API_KEY || '648639437789343',
   api_secret: process.env.CLOUDINARY_API_SECRET || 'frluELM6NDqKm2RaQBvEheP1oK8',
 });
 
-// ⚙️ إعداد التخزين المباشر في Cloudinary بواسطة Multer
+// ⚙️ إعداد Multer مع CloudinaryStorage
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
@@ -27,6 +27,42 @@ const storage = new CloudinaryStorage({
 });
 
 const upload = multer({ storage: storage });
+
+// 🛠️ دالة مساعدة لاستخراج الـ public_id من رابط Cloudinary لحذفه
+const getPublicIdFromUrl = (url) => {
+  if (!url || !url.includes('cloudinary.com')) return null;
+  try {
+    const parts = url.split('/');
+    const uploadIndex = parts.indexOf('upload');
+    if (uploadIndex === -1) return null;
+
+    // استخراج المسار بعد مجلد upload والنسخة v123456789
+    const pathAfterUpload = parts.slice(uploadIndex + 1);
+    if (pathAfterUpload[0].startsWith('v')) {
+      pathAfterUpload.shift(); // حذف رقم الـ Version
+    }
+
+    const fullPath = pathAfterUpload.join('/');
+    const publicId = fullPath.substring(0, fullPath.lastIndexOf('.')); // إزالة الامتداد (.jpg/.pdf)
+    return publicId;
+  } catch (error) {
+    console.error('❌ Error parsing public_id:', error);
+    return null;
+  }
+};
+
+// 🛠️ دالة مساعدة لحذف الملف القديم من Cloudinary
+const deleteOldCloudinaryFile = async (fileUrl, resourceType = 'image') => {
+  const publicId = getPublicIdFromUrl(fileUrl);
+  if (publicId) {
+    try {
+      await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
+      console.log(`🗑️ Deleted old file from Cloudinary: ${publicId}`);
+    } catch (err) {
+      console.error('❌ Failed to delete old file from Cloudinary:', err);
+    }
+  }
+};
 
 // ✅ 1. جلب البيانات (GET /api/information)
 router.get('/', async (req, res) => {
@@ -55,9 +91,19 @@ router.post('/image', upload.single('image'), async (req, res) => {
       return res.status(400).json({ success: false, message: 'لم يتم اختيار صورة' });
     }
 
-    // req.file.path هو رابط الصورة المباشر على Cloudinary
+    // 1. جلب رابط الصورة القديمة لربطها بالحذف
+    const [rows] = await db.query('SELECT image FROM information WHERE id = 1');
+    const oldImageUrl = rows[0]?.image;
+
+    // 2. حذف الصورة القديمة من Cloudinary إن وجدت
+    if (oldImageUrl) {
+      await deleteOldCloudinaryFile(oldImageUrl, 'image');
+    }
+
+    // 3. رابط الصورة الجديدة المرفوعة
     const imageUrl = req.file.path;
 
+    // 4. تحديث قاعدة البيانات
     const query = 'UPDATE information SET image = ? WHERE id = 1';
     await db.query(query, [imageUrl]);
 
@@ -84,8 +130,19 @@ router.post('/pdf', upload.single('pdf'), async (req, res) => {
       return res.status(400).json({ success: false, message: 'لم يتم اختيار ملف PDF' });
     }
 
+    // 1. جلب رابط الـ CV القديم
+    const [rows] = await db.query('SELECT cv_file FROM information WHERE id = 1');
+    const oldPdfUrl = rows[0]?.cv_file;
+
+    // 2. حذف الـ CV القديم من Cloudinary إن وجد
+    if (oldPdfUrl) {
+      await deleteOldCloudinaryFile(oldPdfUrl, 'raw'); // الـ PDF عادة بيتعامل كـ raw أو image
+    }
+
+    // 3. رابط الملف الجديد
     const pdfUrl = req.file.path;
 
+    // 4. تحديث قاعدة البيانات
     const query = 'UPDATE information SET cv_file = ? WHERE id = 1';
     await db.query(query, [pdfUrl]);
 
