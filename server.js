@@ -1,5 +1,5 @@
 // ============================================================
-// 📁 C:\laragon\www\react-portfolio-backend\server.js
+// 📁 server.js
 // ============================================================
 import express from "express";
 import cors from "cors";
@@ -24,7 +24,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// ✅ إعداد الـ CORS السماح الكامل للفرونت إند من Vercel أو المحلي
+// ✅ إعداد الـ CORS
 app.use(
   cors({
     origin: "*",
@@ -33,8 +33,9 @@ app.use(
   })
 );
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// ✅ زيادة مساحة استقبال الـ Base64 لـ 10MB (ضروري جداً يكون هنا قبل الـ Routes)
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
 // ✅ خدمة الملفات الثابتة (Uploads)
 app.use(
@@ -64,7 +65,7 @@ app.use("/api/skills/backend", skillsBackendRoutes);
 app.use("/api/experiences", experiencesRoutes);
 app.use("/api/projects", projectsRoutes);
 
-// ✅ تشغيل السيرفر محلياً فقط في حالة التطوير (Local Development)
+// ✅ تشغيل السيرفر محلياً
 if (process.env.NODE_ENV !== "production") {
   const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => {
@@ -72,5 +73,5 @@ if (process.env.NODE_ENV !== "production") {
   });
 }
 
-// ✅ تصدير التطبيق لتشغيله على Vercel Serverless Functions
+// ✅ تصدير التطبيق لتشغيله على Vercel
 export default app;
