@@ -3,12 +3,30 @@
 // ============================================================
 import express from 'express';
 import multer from 'multer';
+import { v2 as cloudinary } from 'cloudinary';
+import { CloudinaryStorage } from 'multer-storage-cloudinary';
 import db from '../../config/db.js';
 
 const router = express.Router();
 
-// ⚙️ استخدام MemoryStorage بدلاً من DiskStorage لتوافق Vercel وعدم حدوث Server Error (500)
-const upload = multer({ storage: multer.memoryStorage() });
+// ⚙️ إعداد Cloudinary بالمفاتيح الخاصة بك
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'qnfujvlo',
+  api_key: process.env.CLOUDINARY_API_KEY || '648639437789343',
+  api_secret: process.env.CLOUDINARY_API_SECRET || 'frluELM6NDqKm2RaQBvEheP1oK8',
+});
+
+// ⚙️ إعداد التخزين المباشر في Cloudinary بواسطة Multer
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'portfolio_uploads',
+    allowed_formats: ['jpg', 'png', 'jpeg', 'webp', 'pdf'],
+    resource_type: 'auto',
+  },
+});
+
+const upload = multer({ storage: storage });
 
 // ✅ 1. جلب البيانات (GET /api/information)
 router.get('/', async (req, res) => {
@@ -30,19 +48,24 @@ router.get('/', async (req, res) => {
   }
 });
 
-// ✅ 2. رفع الصورة الشخصية (POST /api/information/image)
+// ✅ 2. رفع الصورة الشخصية إلى Cloudinary (POST /api/information/image)
 router.post('/image', upload.single('image'), async (req, res) => {
   try {
-    const imagePath = req.body.image || '/image/hero.jpg';
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'لم يتم اختيار صورة' });
+    }
 
-    // تحديث مسار الصورة في جدول الـ information
+    // req.file.path هو رابط الصورة المباشر على Cloudinary
+    const imageUrl = req.file.path;
+
     const query = 'UPDATE information SET image = ? WHERE id = 1';
-    await db.query(query, [imagePath]);
+    await db.query(query, [imageUrl]);
 
     return res.json({
       success: true,
-      message: '✅ Image updated successfully',
-      image: imagePath,
+      message: '✅ Image uploaded to Cloudinary successfully',
+      image: imageUrl,
+      image_url: imageUrl,
     });
   } catch (err) {
     console.error('❌ Error updating image:', err);
@@ -54,15 +77,23 @@ router.post('/image', upload.single('image'), async (req, res) => {
   }
 });
 
-// ✅ 3. رفع ملف الـ CV PDF (POST /api/information/pdf)
+// ✅ 3. رفع ملف الـ CV PDF إلى Cloudinary (POST /api/information/pdf)
 router.post('/pdf', upload.single('pdf'), async (req, res) => {
   try {
-    const pdfPath = req.body.pdf || req.file?.originalname || 'cv.pdf';
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'لم يتم اختيار ملف PDF' });
+    }
+
+    const pdfUrl = req.file.path;
+
+    const query = 'UPDATE information SET cv_file = ? WHERE id = 1';
+    await db.query(query, [pdfUrl]);
 
     return res.json({
       success: true,
-      message: '✅ PDF received successfully',
-      filename: pdfPath,
+      message: '✅ PDF uploaded to Cloudinary successfully',
+      filename: pdfUrl,
+      pdf_url: pdfUrl,
     });
   } catch (err) {
     console.error('❌ Error uploading PDF:', err);
@@ -76,11 +107,12 @@ router.post('/pdf', upload.single('pdf'), async (req, res) => {
 
 // ✅ 4. تحديث البيانات كاملة (PUT /api/information)
 router.put('/', async (req, res) => {
-  const data = req.body;
+  const data = { ...req.body };
 
   delete data.created_at;
   delete data.updated_at;
   delete data.image_url;
+  delete data.pdf_url;
 
   try {
     const query = 'UPDATE information SET ? WHERE id = 1';
