@@ -5,6 +5,8 @@ import express from "express";
 import cors from "cors";
 import { v2 as cloudinary } from "cloudinary";
 import mysql from "mysql2/promise";
+import multer from "multer";
+import path from "path";
 
 const app = express();
 
@@ -12,8 +14,13 @@ const app = express();
 app.use(
   cors({ origin: "*", methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"] }),
 );
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ limit: "10mb", extended: true }));
+
+// ⚙️ إعداد Multer لاستقبال الملفات
+const storage = multer.memoryStorage();
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB حد أقصى
+});
 
 // ⚙️ إعداد Cloudinary
 cloudinary.config({
@@ -69,15 +76,18 @@ app.get("/api/projects", async (req, res) => {
   }
 });
 
-// ✅ 2. POST (/api/projects)
-app.post("/api/projects", async (req, res) => {
+// ✅ 2. POST (/api/projects) - مع Multer
+app.post("/api/projects", upload.single("image"), async (req, res) => {
   let connection;
   try {
-    const { title, description, link, technologies, status, image } = req.body;
+    const { title, description, link, technologies, status } = req.body;
     let imageUrl = null;
 
-    if (image && typeof image === "string" && image.startsWith("data:image")) {
-      const uploadRes = await cloudinary.uploader.upload(image, {
+    // رفع الصورة لو موجودة
+    if (req.file) {
+      // تحويل buffer إلى base64
+      const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`;
+      const uploadRes = await cloudinary.uploader.upload(base64Image, {
         folder: "portfolio_uploads/projects",
       });
       imageUrl = uploadRes.secure_url;
@@ -105,16 +115,17 @@ app.post("/api/projects", async (req, res) => {
     });
   } catch (err) {
     if (connection) await connection.end();
+    console.error("❌ POST Error:", err);
     return res.status(500).json({ success: false, error_message: err.message });
   }
 });
 
-// ✅ 3. PUT (/api/projects/:id)
-app.put("/api/projects/:id", async (req, res) => {
+// ✅ 3. PUT (/api/projects/:id) - مع Multer
+app.put("/api/projects/:id", upload.single("image"), async (req, res) => {
   let connection;
   try {
     const { id } = req.params;
-    const { title, description, link, technologies, status, image } = req.body;
+    const { title, description, link, technologies, status } = req.body;
 
     connection = await getDbConnection();
 
@@ -134,9 +145,10 @@ app.put("/api/projects/:id", async (req, res) => {
     let newImageUrl = oldProject.image;
 
     // لو رفع صورة جديدة
-    if (image && typeof image === "string" && image.startsWith("data:image")) {
+    if (req.file) {
       // 1. رفع الصورة الجديدة لـ Cloudinary
-      const uploadRes = await cloudinary.uploader.upload(image, {
+      const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`;
+      const uploadRes = await cloudinary.uploader.upload(base64Image, {
         folder: "portfolio_uploads/projects",
       });
       newImageUrl = uploadRes.secure_url;
@@ -147,6 +159,7 @@ app.put("/api/projects/:id", async (req, res) => {
         if (publicId) {
           try {
             await cloudinary.uploader.destroy(publicId);
+            console.log("✅ Old image deleted:", publicId);
           } catch (delErr) {
             console.error("⚠️ Cloudinary delete error:", delErr);
           }
@@ -180,6 +193,7 @@ app.put("/api/projects/:id", async (req, res) => {
     });
   } catch (err) {
     if (connection) await connection.end();
+    console.error("❌ PUT Error:", err);
     return res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -205,6 +219,7 @@ app.delete("/api/projects/:id", async (req, res) => {
       if (publicId) {
         try {
           await cloudinary.uploader.destroy(publicId);
+          console.log("✅ Image deleted:", publicId);
         } catch (delErr) {
           console.error("⚠️ Cloudinary delete error:", delErr);
         }
