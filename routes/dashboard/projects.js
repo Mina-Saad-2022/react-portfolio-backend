@@ -16,19 +16,36 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// ⚙️ إعداد Multer مع CloudinaryStorage
+// 🛠️ تنظيف اسم المشروع لاستخدامه كاسم ملف
+const sanitizeFilename = (name) => {
+  if (!name) return "project";
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "_")
+    .replace(/_+/g, "_")
+    .substring(0, 50);
+};
+
+// ⚙️ إعداد Multer Storage مع الحفظ باسم المشروع
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
-  params: {
-    folder: "portfolio_uploads/projects",
-    allowed_formats: ["jpg", "png", "jpeg", "webp", "svg"],
-    resource_type: "auto",
+  params: async (req, file) => {
+    const rawTitle = req.body.title || "project";
+    const cleanTitle = sanitizeFilename(rawTitle);
+    const uniqueSuffix = Date.now();
+
+    return {
+      folder: "portfolio_uploads/projects",
+      public_id: `${cleanTitle}_${uniqueSuffix}`,
+      allowed_formats: ["jpg", "png", "jpeg", "webp", "svg"],
+      resource_type: "auto",
+    };
   },
 });
 
 const upload = multer({ storage: storage });
 
-// 🛠️ استخراج public_id المضمون لحذف الصور من Cloudinary
+// 🛠️ استخراج public_id لحذف الصورة من Cloudinary
 const extractPublicId = (url) => {
   if (!url || typeof url !== "string" || !url.includes("cloudinary.com"))
     return null;
@@ -79,7 +96,7 @@ router.get("/", async (req, res) => {
 // ✅ 2. إضافة مشروع جديد (POST /api/projects)
 router.post("/", upload.single("image"), async (req, res) => {
   try {
-    const { title, description, link, technologies } = req.body;
+    const { title, description, link, technologies, status } = req.body;
     let imageUrl = null;
 
     if (req.file) {
@@ -95,6 +112,7 @@ router.post("/", upload.single("image"), async (req, res) => {
       description: description || "",
       link: link || "",
       technologies: techString,
+      status: status || "active",
       image: imageUrl,
     };
 
@@ -120,7 +138,7 @@ router.post("/", upload.single("image"), async (req, res) => {
 router.put("/:id", upload.single("image"), async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, description, link, technologies } = req.body;
+    const { title, description, link, technologies, status } = req.body;
 
     const [existing] = await db.query("SELECT * FROM projects WHERE id = ?", [
       id,
@@ -134,6 +152,7 @@ router.put("/:id", upload.single("image"), async (req, res) => {
     const oldProject = existing[0];
     let newImageUrl = oldProject.image;
 
+    // إذا تم رفع صورة جديدة، احذف القديمة فوراً من Cloudinary
     if (req.file) {
       if (oldProject.image) {
         await deleteOldCloudinaryFile(oldProject.image);
@@ -148,10 +167,9 @@ router.put("/:id", upload.single("image"), async (req, res) => {
           : technologies
         : oldProject.technologies;
 
-    // تم حذف status من الاستعلام تماماً
     const sql = `
       UPDATE projects 
-      SET title = ?, description = ?, link = ?, technologies = ?, image = ?
+      SET title = ?, description = ?, link = ?, technologies = ?, status = ?, image = ?
       WHERE id = ?
     `;
     const values = [
@@ -159,6 +177,7 @@ router.put("/:id", upload.single("image"), async (req, res) => {
       description !== undefined ? description : oldProject.description,
       link !== undefined ? link : oldProject.link,
       techValue,
+      status !== undefined ? status : oldProject.status,
       newImageUrl,
       id,
     ];
