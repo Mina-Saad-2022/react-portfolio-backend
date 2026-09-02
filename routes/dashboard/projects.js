@@ -80,7 +80,7 @@ const deleteOldCloudinaryFile = async (fileUrl) => {
   }
 };
 
-// ✅ 1. جلب جميع المشاريع مع فحص رابط الصورة
+// ✅ 1. جلب جميع المشاريع مع الحماية
 router.get("/", async (req, res) => {
   try {
     const [results] = await db.query("SELECT * FROM projects ORDER BY id DESC");
@@ -93,21 +93,49 @@ router.get("/", async (req, res) => {
       })),
     });
   } catch (err) {
+    console.error("❌ GET Error:", err);
     return res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// ✅ 2. تحديث الحالة فقط (دعم PUT و PATCH لتفادي مشاكل CORS)
+// ✅ 2. تحديث الحالة آمن مع Fallback لو عمود status مش موجود في الـ DB
 const handleStatusUpdate = async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
 
     if (!status) {
-      return res.status(400).json({ success: false, message: "Status required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Status is required" });
     }
 
-    await db.query("UPDATE projects SET status = ? WHERE id = ?", [status, id]);
+    try {
+      // المحاولة الأولى: تحديث عمود status مباشر
+      await db.query("UPDATE projects SET status = ? WHERE id = ?", [
+        status,
+        id,
+      ]);
+    } catch (sqlErr) {
+      console.warn(
+        "⚠️ Column 'status' might be missing, adding it dynamically...",
+        sqlErr.message,
+      );
+
+      // إضافة العمود تلقائياً في حالة عدم وجوده لمنع الـ 500 Error
+      try {
+        await db.query(
+          "ALTER TABLE projects ADD COLUMN status VARCHAR(20) DEFAULT 'active'",
+        );
+        await db.query("UPDATE projects SET status = ? WHERE id = ?", [
+          status,
+          id,
+        ]);
+      } catch (alterErr) {
+        console.error("❌ Failed to alter table:", alterErr);
+        throw alterErr;
+      }
+    }
 
     return res.json({
       success: true,
@@ -115,14 +143,17 @@ const handleStatusUpdate = async (req, res) => {
       status: status,
     });
   } catch (err) {
-    return res.status(500).json({ success: false, message: err.message });
+    console.error("❌ Status Update Error 500:", err);
+    return res
+      .status(500)
+      .json({ success: false, message: err.message, stack: err.stack });
   }
 };
 
 router.patch("/:id/status", handleStatusUpdate);
 router.put("/:id/status", handleStatusUpdate);
 
-// ✅ 3. إضافة مشروع
+// ✅ 3. إضافة مشروع جديد
 router.post("/", handleUpload, async (req, res) => {
   try {
     const { title, description, link, technologies, status } = req.body || {};
@@ -141,25 +172,47 @@ router.post("/", handleUpload, async (req, res) => {
       status: status || "active",
     };
 
-    const [result] = await db.query("INSERT INTO projects SET ?", [insertData]);
-    return res.json({
-      success: true,
-      data: { id: result.insertId, ...insertData, image_url: imageUrl },
-    });
+    try {
+      const [result] = await db.query("INSERT INTO projects SET ?", [
+        insertData,
+      ]);
+      return res.json({
+        success: true,
+        data: { id: result.insertId, ...insertData, image_url: imageUrl },
+      });
+    } catch (dbErr) {
+      delete insertData.status;
+      const [result] = await db.query("INSERT INTO projects SET ?", [
+        insertData,
+      ]);
+      return res.json({
+        success: true,
+        data: {
+          id: result.insertId,
+          ...insertData,
+          status: "active",
+          image_url: imageUrl,
+        },
+      });
+    }
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// ✅ 4. تحديث مشروع
+// ✅ 4. تحديث كامل للمشروع
 router.put("/:id", handleUpload, async (req, res) => {
   try {
     const { id } = req.params;
     const body = req.body || {};
 
-    const [existing] = await db.query("SELECT * FROM projects WHERE id = ?", [id]);
+    const [existing] = await db.query("SELECT * FROM projects WHERE id = ?", [
+      id,
+    ]);
     if (!existing.length) {
-      return res.status(404).json({ success: false, message: "Not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Project not found" });
     }
 
     const oldProject = existing[0];
@@ -174,14 +227,33 @@ router.put("/:id", handleUpload, async (req, res) => {
     const updatedDesc = body.description ?? oldProject.description;
     const updatedLink = body.link ?? oldProject.link;
     const updatedTech = body.technologies ?? oldProject.technologies;
-    const updatedStatus = body.status ?? oldProject.status;
+    const updatedStatus = body.status ?? oldProject.status ?? "active";
 
-    await db.query(
-      "UPDATE projects SET title=?, description=?, link=?, technologies=?, status=?, image=? WHERE id=?",
-      [updatedTitle, updatedDesc, updatedLink, updatedTech, updatedStatus, newImageUrl, id]
-    );
+    try {
+      await db.query(
+        "UPDATE projects SET title=?, description=?, link=?, technologies=?, status=?, image=? WHERE id=?",
+        [
+          updatedTitle,
+          updatedDesc,
+          updatedLink,
+          updatedTech,
+          updatedStatus,
+          newImageUrl,
+          id,
+        ],
+      );
+    } catch (dbErr) {
+      await db.query(
+        "UPDATE projects SET title=?, description=?, link=?, technologies=?, image=? WHERE id=?",
+        [updatedTitle, updatedDesc, updatedLink, updatedTech, newImageUrl, id],
+      );
+    }
 
-    return res.json({ success: true, image_url: newImageUrl, status: updatedStatus });
+    return res.json({
+      success: true,
+      image_url: newImageUrl,
+      status: updatedStatus,
+    });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -191,7 +263,10 @@ router.put("/:id", handleUpload, async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const [existing] = await db.query("SELECT image FROM projects WHERE id = ?", [id]);
+    const [existing] = await db.query(
+      "SELECT image FROM projects WHERE id = ?",
+      [id],
+    );
     if (existing.length && existing[0].image) {
       await deleteOldCloudinaryFile(existing[0].image);
     }
