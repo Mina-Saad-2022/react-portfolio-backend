@@ -30,7 +30,7 @@ const sanitizeFilename = (name) => {
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: async (req, file) => {
-    const rawTitle = req.body.title || "project";
+    const rawTitle = req.body?.title || "project";
     const cleanTitle = sanitizeFilename(rawTitle);
     const uniqueSuffix = Date.now();
 
@@ -44,6 +44,15 @@ const storage = new CloudinaryStorage({
 });
 
 const upload = multer({ storage: storage });
+
+// Middleware للتعامل مع المجموعات (سواء FormData أو JSON عادي)
+const handleUpload = (req, res, next) => {
+  const contentType = req.headers["content-type"] || "";
+  if (contentType.includes("multipart/form-data")) {
+    return upload.single("image")(req, res, next);
+  }
+  next();
+};
 
 // 🛠️ استخراج public_id لحذف الصورة من Cloudinary
 const extractPublicId = (url) => {
@@ -98,9 +107,9 @@ router.get("/", async (req, res) => {
 });
 
 // ✅ 2. إضافة مشروع جديد (POST /api/projects)
-router.post("/", upload.single("image"), async (req, res) => {
+router.post("/", handleUpload, async (req, res) => {
   try {
-    const { title, description, link, technologies, status } = req.body;
+    const { title, description, link, technologies, status } = req.body || {};
     let imageUrl = null;
 
     if (req.file) {
@@ -120,7 +129,6 @@ router.post("/", upload.single("image"), async (req, res) => {
     };
 
     try {
-      // محاولة الإدخال مع حقل status
       const [result] = await db.query("INSERT INTO projects SET ?", [
         { ...insertData, status: status || "active" },
       ]);
@@ -135,7 +143,6 @@ router.post("/", upload.single("image"), async (req, res) => {
         },
       });
     } catch (dbErr) {
-      // Fallback في حالة عدم وجود عمود status أونلاين
       const [result] = await db.query("INSERT INTO projects SET ?", [
         insertData,
       ]);
@@ -162,10 +169,11 @@ router.post("/", upload.single("image"), async (req, res) => {
 });
 
 // ✅ 3. تحديث مشروع (PUT /api/projects/:id)
-router.put("/:id", upload.single("image"), async (req, res) => {
+router.put("/:id", handleUpload, async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, description, link, technologies, status } = req.body;
+    const body = req.body || {};
+    const { title, description, link, technologies, status } = body;
 
     const [existing] = await db.query("SELECT * FROM projects WHERE id = ?", [
       id,
@@ -201,7 +209,6 @@ router.put("/:id", upload.single("image"), async (req, res) => {
       status !== undefined ? status : oldProject.status || "active";
 
     try {
-      // محاولة التحديث بوجود status
       const sql = `
         UPDATE projects 
         SET title = ?, description = ?, link = ?, technologies = ?, status = ?, image = ?
@@ -217,7 +224,6 @@ router.put("/:id", upload.single("image"), async (req, res) => {
         id,
       ]);
     } catch (dbErr) {
-      // Fallback في حالة عدم وجود عمود status
       const fallbackSql = `
         UPDATE projects 
         SET title = ?, description = ?, link = ?, technologies = ?, image = ?
