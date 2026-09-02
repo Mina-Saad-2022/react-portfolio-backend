@@ -16,7 +16,7 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// 🛠️ تنظيف اسم المشروع لاستخدامه كاسم ملف
+// 🛠️ تنظيف اسم المشروع
 const sanitizeFilename = (name) => {
   if (!name) return "project";
   return name
@@ -26,7 +26,7 @@ const sanitizeFilename = (name) => {
     .substring(0, 50);
 };
 
-// ⚙️ إعداد Multer Storage مع الحفظ باسم المشروع
+// ⚙️ Multer Storage
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: async (req, file) => {
@@ -45,7 +45,6 @@ const storage = new CloudinaryStorage({
 
 const upload = multer({ storage: storage });
 
-// Middleware معالجة رفع الملفات والـ JSON بمرونة
 const handleUpload = (req, res, next) => {
   const contentType = req.headers["content-type"] || "";
   if (contentType.includes("multipart/form-data")) {
@@ -54,7 +53,6 @@ const handleUpload = (req, res, next) => {
   next();
 };
 
-// 🛠️ استخراج public_id لحذف الصورة من Cloudinary
 const extractPublicId = (url) => {
   if (!url || typeof url !== "string" || !url.includes("cloudinary.com"))
     return null;
@@ -71,20 +69,18 @@ const extractPublicId = (url) => {
   }
 };
 
-// 🛠️ دالة مساعدة لحذف الملف القديم من Cloudinary
 const deleteOldCloudinaryFile = async (fileUrl) => {
   const publicId = extractPublicId(fileUrl);
   if (publicId) {
     try {
       await cloudinary.uploader.destroy(publicId);
-      console.log(`🗑️ Deleted old image from Cloudinary: ${publicId}`);
     } catch (err) {
       console.error("❌ Failed to delete old image:", err);
     }
   }
 };
 
-// ✅ 1. جلب جميع المشاريع (GET /api/projects)
+// ✅ 1. جلب جميع المشاريع مع فحص رابط الصورة
 router.get("/", async (req, res) => {
   try {
     const [results] = await db.query("SELECT * FROM projects ORDER BY id DESC");
@@ -97,25 +93,18 @@ router.get("/", async (req, res) => {
       })),
     });
   } catch (err) {
-    console.error("❌ GET Error:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch projects",
-      error_message: err.message,
-    });
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// ✅ 2. تحديث حالة المشروع فقط مباشرة (PATCH /api/projects/:id/status)
-router.patch("/:id/status", async (req, res) => {
+// ✅ 2. تحديث الحالة فقط (دعم PUT و PATCH لتفادي مشاكل CORS)
+const handleStatusUpdate = async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
 
     if (!status) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Status is required" });
+      return res.status(400).json({ success: false, message: "Status required" });
     }
 
     await db.query("UPDATE projects SET status = ? WHERE id = ?", [status, id]);
@@ -126,20 +115,18 @@ router.patch("/:id/status", async (req, res) => {
       status: status,
     });
   } catch (err) {
-    console.error("❌ Status Update Error:", err);
     return res.status(500).json({ success: false, message: err.message });
   }
-});
+};
 
-// ✅ 3. إضافة مشروع جديد (POST /api/projects)
+router.patch("/:id/status", handleStatusUpdate);
+router.put("/:id/status", handleStatusUpdate);
+
+// ✅ 3. إضافة مشروع
 router.post("/", handleUpload, async (req, res) => {
   try {
     const { title, description, link, technologies, status } = req.body || {};
-    let imageUrl = null;
-
-    if (req.file) {
-      imageUrl = req.file.path;
-    }
+    let imageUrl = req.file ? req.file.path : null;
 
     const techString = Array.isArray(technologies)
       ? technologies.join(",")
@@ -151,163 +138,67 @@ router.post("/", handleUpload, async (req, res) => {
       link: link || "",
       technologies: techString,
       image: imageUrl,
+      status: status || "active",
     };
 
-    try {
-      const [result] = await db.query("INSERT INTO projects SET ?", [
-        { ...insertData, status: status || "active" },
-      ]);
-      return res.json({
-        success: true,
-        message: "✅ Project created successfully",
-        data: {
-          id: result.insertId,
-          ...insertData,
-          status: status || "active",
-          image_url: imageUrl,
-        },
-      });
-    } catch (dbErr) {
-      const [result] = await db.query("INSERT INTO projects SET ?", [
-        insertData,
-      ]);
-      return res.json({
-        success: true,
-        message: "✅ Project created successfully",
-        data: {
-          id: result.insertId,
-          ...insertData,
-          status: "active",
-          image_url: imageUrl,
-        },
-      });
-    }
-  } catch (err) {
-    console.error("❌ POST Project Error:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to create project",
-      error_message: err.message,
-      error_stack: err.stack,
+    const [result] = await db.query("INSERT INTO projects SET ?", [insertData]);
+    return res.json({
+      success: true,
+      data: { id: result.insertId, ...insertData, image_url: imageUrl },
     });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// ✅ 4. تحديث كامل لمشروع (PUT /api/projects/:id)
+// ✅ 4. تحديث مشروع
 router.put("/:id", handleUpload, async (req, res) => {
   try {
     const { id } = req.params;
     const body = req.body || {};
-    const { title, description, link, technologies, status } = body;
 
-    const [existing] = await db.query("SELECT * FROM projects WHERE id = ?", [
-      id,
-    ]);
-    if (!existing || existing.length === 0) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Project not found" });
+    const [existing] = await db.query("SELECT * FROM projects WHERE id = ?", [id]);
+    if (!existing.length) {
+      return res.status(404).json({ success: false, message: "Not found" });
     }
 
     const oldProject = existing[0];
     let newImageUrl = oldProject.image;
 
     if (req.file) {
-      if (oldProject.image) {
-        await deleteOldCloudinaryFile(oldProject.image);
-      }
+      if (oldProject.image) await deleteOldCloudinaryFile(oldProject.image);
       newImageUrl = req.file.path;
     }
 
-    const techValue =
-      technologies !== undefined
-        ? Array.isArray(technologies)
-          ? technologies.join(",")
-          : technologies
-        : oldProject.technologies;
+    const updatedTitle = body.title ?? oldProject.title;
+    const updatedDesc = body.description ?? oldProject.description;
+    const updatedLink = body.link ?? oldProject.link;
+    const updatedTech = body.technologies ?? oldProject.technologies;
+    const updatedStatus = body.status ?? oldProject.status;
 
-    const updatedTitle = title !== undefined ? title : oldProject.title;
-    const updatedDesc =
-      description !== undefined ? description : oldProject.description;
-    const updatedLink = link !== undefined ? link : oldProject.link;
-    const updatedStatus =
-      status !== undefined ? status : oldProject.status || "active";
+    await db.query(
+      "UPDATE projects SET title=?, description=?, link=?, technologies=?, status=?, image=? WHERE id=?",
+      [updatedTitle, updatedDesc, updatedLink, updatedTech, updatedStatus, newImageUrl, id]
+    );
 
-    try {
-      const sql = `
-        UPDATE projects 
-        SET title = ?, description = ?, link = ?, technologies = ?, status = ?, image = ?
-        WHERE id = ?
-      `;
-      await db.query(sql, [
-        updatedTitle,
-        updatedDesc,
-        updatedLink,
-        techValue,
-        updatedStatus,
-        newImageUrl,
-        id,
-      ]);
-    } catch (dbErr) {
-      const fallbackSql = `
-        UPDATE projects 
-        SET title = ?, description = ?, link = ?, technologies = ?, image = ?
-        WHERE id = ?
-      `;
-      await db.query(fallbackSql, [
-        updatedTitle,
-        updatedDesc,
-        updatedLink,
-        techValue,
-        newImageUrl,
-        id,
-      ]);
-    }
-
-    return res.json({
-      success: true,
-      message: "✅ Project updated successfully",
-      image_url: newImageUrl,
-      status: updatedStatus,
-    });
+    return res.json({ success: true, image_url: newImageUrl, status: updatedStatus });
   } catch (err) {
-    console.error("❌ PUT Project Error:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error while updating project",
-      error_message: err.message,
-      error_stack: err.stack,
-    });
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// ✅ 5. حذف مشروع (DELETE /api/projects/:id)
+// ✅ 5. حذف مشروع
 router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-
-    const [existing] = await db.query(
-      "SELECT image FROM projects WHERE id = ?",
-      [id],
-    );
-
-    if (existing.length > 0 && existing[0].image) {
+    const [existing] = await db.query("SELECT image FROM projects WHERE id = ?", [id]);
+    if (existing.length && existing[0].image) {
       await deleteOldCloudinaryFile(existing[0].image);
     }
-
     await db.query("DELETE FROM projects WHERE id = ?", [id]);
-
-    return res.json({
-      success: true,
-      message: "✅ Project deleted successfully",
-    });
+    return res.json({ success: true });
   } catch (err) {
-    console.error("❌ DELETE Project Error:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to delete project",
-      error_message: err.message,
-    });
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 
