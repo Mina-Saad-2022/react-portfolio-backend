@@ -1,83 +1,167 @@
+// ============================================================
+// 📁 react-portfolio-backend/routes/dashboard/projects.js
+// ============================================================
 import express from "express";
 import multer from "multer";
 import { v2 as cloudinary } from "cloudinary";
-import db from "../../db.js"; // تأكد من مسار ملف الربط بالداتابيز عندك
+import { CloudinaryStorage } from "multer-storage-cloudinary";
+import db from "../../config/db.js";
 
 const router = express.Router();
-const upload = multer({ dest: "/tmp" });
 
-// دالة حماية لحذف الصورة القديمة من Cloudinary بدون إيقاف السيرفر
-const deleteOldCloudinaryFile = async (imageUrl) => {
+// ⚙️ إعداد Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+// 🛠️ تنظيف اسم المشروع لاستخدامه كاسم ملف
+const sanitizeFilename = (name) => {
+  if (!name) return "project";
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "_")
+    .replace(/_+/g, "_")
+    .substring(0, 50);
+};
+
+// ⚙️ إعداد Multer Storage مع الحفظ باسم المشروع
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: async (req, file) => {
+    const rawTitle = req.body.title || "project";
+    const cleanTitle = sanitizeFilename(rawTitle);
+    const uniqueSuffix = Date.now();
+
+    return {
+      folder: "portfolio_uploads/projects",
+      public_id: `${cleanTitle}_${uniqueSuffix}`,
+      allowed_formats: ["jpg", "png", "jpeg", "webp", "svg"],
+      resource_type: "auto",
+    };
+  },
+});
+
+const upload = multer({ storage: storage });
+
+// 🛠️ استخراج public_id لحذف الصورة من Cloudinary
+const extractPublicId = (url) => {
+  if (!url || typeof url !== "string" || !url.includes("cloudinary.com"))
+    return null;
   try {
-    if (!imageUrl || !imageUrl.includes("cloudinary.com")) return;
-    const parts = imageUrl.split("/");
-    const fileNameWithExt = parts.pop();
-    const publicId = fileNameWithExt.split(".")[0];
-    await cloudinary.uploader.destroy(`projects/${publicId}`);
+    const parts = url.split("/upload/");
+    if (parts.length < 2) return null;
+    let publicIdWithExt = parts[1].replace(/^v\d+\//, "");
+    const lastDot = publicIdWithExt.lastIndexOf(".");
+    return lastDot !== -1
+      ? publicIdWithExt.substring(0, lastDot)
+      : publicIdWithExt;
   } catch (err) {
-    console.error("Cloudinary deletion non-blocking error:", err.message);
+    return null;
   }
 };
 
-// GET: جلب جميع المشاريع
+// 🛠️ دالة مساعدة لحذف الملف القديم من Cloudinary
+const deleteOldCloudinaryFile = async (fileUrl) => {
+  const publicId = extractPublicId(fileUrl);
+  if (publicId) {
+    try {
+      await cloudinary.uploader.destroy(publicId);
+      console.log(`🗑️ Deleted old image from Cloudinary: ${publicId}`);
+    } catch (err) {
+      console.error("❌ Failed to delete old image:", err);
+    }
+  }
+};
+
+// ✅ 1. جلب جميع المشاريع (GET /api/projects)
 router.get("/", async (req, res) => {
   try {
-    const [rows] = await db.query("SELECT * FROM projects ORDER BY id DESC");
-    return res.json(rows);
+    const [results] = await db.query("SELECT * FROM projects ORDER BY id DESC");
+    return res.json({
+      success: true,
+      data: results.map((p) => ({
+        ...p,
+        image_url: p.image || null,
+        status: p.status || "active",
+      })),
+    });
   } catch (err) {
-    return res.status(500).json({ success: false, message: err.message });
+    console.error("❌ GET Error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch projects",
+      error_message: err.message,
+    });
   }
 });
 
-// POST: إضافة مشروع جديد
+// ✅ 2. إضافة مشروع جديد (POST /api/projects)
 router.post("/", upload.single("image"), async (req, res) => {
   try {
     const { title, description, link, technologies, status } = req.body;
     let imageUrl = null;
 
     if (req.file) {
-      const uploadRes = await cloudinary.uploader.upload(req.file.path, {
-        folder: "projects",
-      });
-      imageUrl = uploadRes.secure_url;
+      imageUrl = req.file.path;
     }
 
-    const techValue = Array.isArray(technologies)
+    const techString = Array.isArray(technologies)
       ? technologies.join(",")
       : technologies || "";
-    const statusValue = status || "active";
 
-    // محاولة الإدخال مع حقل status، وفي حال عدم وجود العمود في الداتابيز يتم الإدخال بدونه تلقائياً
+    const insertData = {
+      title: title || "",
+      description: description || "",
+      link: link || "",
+      technologies: techString,
+      image: imageUrl,
+    };
+
     try {
-      const sql =
-        "INSERT INTO projects (title, description, link, technologies, status, image) VALUES (?, ?, ?, ?, ?, ?)";
-      await db.query(sql, [
-        title,
-        description,
-        link,
-        techValue,
-        statusValue,
-        imageUrl,
+      // محاولة الإدخال مع حقل status
+      const [result] = await db.query("INSERT INTO projects SET ?", [
+        { ...insertData, status: status || "active" },
       ]);
+      return res.json({
+        success: true,
+        message: "✅ Project created successfully",
+        data: {
+          id: result.insertId,
+          ...insertData,
+          status: status || "active",
+          image_url: imageUrl,
+        },
+      });
     } catch (dbErr) {
-      const fallbackSql =
-        "INSERT INTO projects (title, description, link, technologies, image) VALUES (?, ?, ?, ?, ?)";
-      await db.query(fallbackSql, [
-        title,
-        description,
-        link,
-        techValue,
-        imageUrl,
+      // Fallback في حالة عدم وجود عمود status أونلاين
+      const [result] = await db.query("INSERT INTO projects SET ?", [
+        insertData,
       ]);
+      return res.json({
+        success: true,
+        message: "✅ Project created successfully",
+        data: {
+          id: result.insertId,
+          ...insertData,
+          status: "active",
+          image_url: imageUrl,
+        },
+      });
     }
-
-    return res.json({ success: true, message: "Project created successfully" });
   } catch (err) {
-    return res.status(500).json({ success: false, message: err.message });
+    console.error("❌ POST Project Error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to create project",
+      error_message: err.message,
+      error_stack: err.stack,
+    });
   }
 });
 
-// PUT: تحديث مشروع (الحل المباشر لمشكلة الـ 500)
+// ✅ 3. تحديث مشروع (PUT /api/projects/:id)
 router.put("/:id", upload.single("image"), async (req, res) => {
   try {
     const { id } = req.params;
@@ -99,18 +183,15 @@ router.put("/:id", upload.single("image"), async (req, res) => {
       if (oldProject.image) {
         await deleteOldCloudinaryFile(oldProject.image);
       }
-      const uploadRes = await cloudinary.uploader.upload(req.file.path, {
-        folder: "projects",
-      });
-      newImageUrl = uploadRes.secure_url;
+      newImageUrl = req.file.path;
     }
 
-    let techValue = oldProject.technologies;
-    if (technologies !== undefined && technologies !== null) {
-      techValue = Array.isArray(technologies)
-        ? technologies.join(",")
-        : String(technologies);
-    }
+    const techValue =
+      technologies !== undefined
+        ? Array.isArray(technologies)
+          ? technologies.join(",")
+          : technologies
+        : oldProject.technologies;
 
     const updatedTitle = title !== undefined ? title : oldProject.title;
     const updatedDesc =
@@ -119,8 +200,8 @@ router.put("/:id", upload.single("image"), async (req, res) => {
     const updatedStatus =
       status !== undefined ? status : oldProject.status || "active";
 
-    // محاولة التحديث بوجود status، وفي حال غياب العمود في الداتابيز يندمج مع الاستعلام البديل فوراً
     try {
+      // محاولة التحديث بوجود status
       const sql = `
         UPDATE projects 
         SET title = ?, description = ?, link = ?, technologies = ?, status = ?, image = ?
@@ -136,6 +217,7 @@ router.put("/:id", upload.single("image"), async (req, res) => {
         id,
       ]);
     } catch (dbErr) {
+      // Fallback في حالة عدم وجود عمود status
       const fallbackSql = `
         UPDATE projects 
         SET title = ?, description = ?, link = ?, technologies = ?, image = ?
@@ -153,37 +235,48 @@ router.put("/:id", upload.single("image"), async (req, res) => {
 
     return res.json({
       success: true,
-      message: "Project updated successfully",
+      message: "✅ Project updated successfully",
       image_url: newImageUrl,
       status: updatedStatus,
     });
   } catch (err) {
-    console.error("PUT Error:", err);
+    console.error("❌ PUT Project Error:", err);
     return res.status(500).json({
       success: false,
       message: "Internal server error while updating project",
       error_message: err.message,
+      error_stack: err.stack,
     });
   }
 });
 
-// DELETE: حذف مشروع
+// ✅ 4. حذف مشروع (DELETE /api/projects/:id)
 router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
+
     const [existing] = await db.query(
       "SELECT image FROM projects WHERE id = ?",
       [id],
     );
 
-    if (existing && existing.length > 0 && existing[0].image) {
+    if (existing.length > 0 && existing[0].image) {
       await deleteOldCloudinaryFile(existing[0].image);
     }
 
     await db.query("DELETE FROM projects WHERE id = ?", [id]);
-    return res.json({ success: true, message: "Project deleted successfully" });
+
+    return res.json({
+      success: true,
+      message: "✅ Project deleted successfully",
+    });
   } catch (err) {
-    return res.status(500).json({ success: false, message: err.message });
+    console.error("❌ DELETE Project Error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete project",
+      error_message: err.message,
+    });
   }
 });
 
