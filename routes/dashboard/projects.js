@@ -16,7 +16,7 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// ⚙️ إعداد Multer مع CloudinaryStorage (زي ما شغال في information.js)
+// ⚙️ إعداد Multer مع CloudinaryStorage
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
@@ -79,15 +79,13 @@ router.get("/", async (req, res) => {
 // ✅ 2. إضافة مشروع جديد (POST /api/projects)
 router.post("/", upload.single("image"), async (req, res) => {
   try {
-    const { title, description, link, technologies, status } = req.body;
+    const { title, description, link, technologies } = req.body;
     let imageUrl = null;
 
-    // لو فيه صورة مرفوعة
     if (req.file) {
-      imageUrl = req.file.path; // Cloudinary link
+      imageUrl = req.file.path;
     }
 
-    // معالجة الـ technologies لو مبعوثة كمصفوفة Array
     const techString = Array.isArray(technologies)
       ? technologies.join(",")
       : technologies || "";
@@ -97,7 +95,6 @@ router.post("/", upload.single("image"), async (req, res) => {
       description: description || "",
       link: link || "",
       technologies: techString,
-      status: status || "active",
       image: imageUrl,
     };
 
@@ -123,9 +120,8 @@ router.post("/", upload.single("image"), async (req, res) => {
 router.put("/:id", upload.single("image"), async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, description, link, technologies, status } = req.body;
+    const { title, description, link, technologies } = req.body;
 
-    // جلب بيانات المشروع القديمة
     const [existing] = await db.query("SELECT * FROM projects WHERE id = ?", [
       id,
     ]);
@@ -138,18 +134,13 @@ router.put("/:id", upload.single("image"), async (req, res) => {
     const oldProject = existing[0];
     let newImageUrl = oldProject.image;
 
-    // إذا تم رفع صورة جديدة
     if (req.file) {
-      // 1. حذف الصورة القديمة من Cloudinary
       if (oldProject.image) {
         await deleteOldCloudinaryFile(oldProject.image);
       }
-
-      // 2. استخدام رابط الصورة الجديدة
       newImageUrl = req.file.path;
     }
 
-    // معالجة الـ technologies لو مبعوثة كمصفوفة
     const techValue =
       technologies !== undefined
         ? Array.isArray(technologies)
@@ -157,10 +148,10 @@ router.put("/:id", upload.single("image"), async (req, res) => {
           : technologies
         : oldProject.technologies;
 
-    // تحديث البيانات في MySQL
+    // تم حذف status من الاستعلام تماماً
     const sql = `
       UPDATE projects 
-      SET title = ?, description = ?, link = ?, technologies = ?, status = ?, image = ?
+      SET title = ?, description = ?, link = ?, technologies = ?, image = ?
       WHERE id = ?
     `;
     const values = [
@@ -168,7 +159,6 @@ router.put("/:id", upload.single("image"), async (req, res) => {
       description !== undefined ? description : oldProject.description,
       link !== undefined ? link : oldProject.link,
       techValue,
-      status !== undefined ? status : oldProject.status,
       newImageUrl,
       id,
     ];
@@ -196,18 +186,15 @@ router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
-    // جلب الصورة القديمة
     const [existing] = await db.query(
       "SELECT image FROM projects WHERE id = ?",
       [id],
     );
 
-    // حذف الصورة من Cloudinary
     if (existing.length > 0 && existing[0].image) {
       await deleteOldCloudinaryFile(existing[0].image);
     }
 
-    // حذف المشروع من قاعدة البيانات
     await db.query("DELETE FROM projects WHERE id = ?", [id]);
 
     return res.json({
