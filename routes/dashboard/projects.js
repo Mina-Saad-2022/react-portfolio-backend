@@ -1,9 +1,11 @@
 // ============================================================
-// 📁 api/projects.js (أو routes/dashboard/projects.js)
+// 📁 react-portfolio-backend/routes/dashboard/projects.js
 // ============================================================
 import express from "express";
+import multer from "multer";
 import { v2 as cloudinary } from "cloudinary";
-import db from "../../config/db.js"; // تأكد من ضبط المسار حسب مكان الملف
+import { CloudinaryStorage } from "multer-storage-cloudinary";
+import db from "../../config/db.js";
 
 const router = express.Router();
 
@@ -13,6 +15,18 @@ cloudinary.config({
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
+
+// ⚙️ إعداد Multer مع CloudinaryStorage (زي ما شغال في information.js)
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: "portfolio_uploads/projects",
+    allowed_formats: ["jpg", "png", "jpeg", "webp", "svg"],
+    resource_type: "auto",
+  },
+});
+
+const upload = multer({ storage: storage });
 
 // 🛠️ استخراج public_id المضمون لحذف الصور من Cloudinary
 const extractPublicId = (url) => {
@@ -31,6 +45,19 @@ const extractPublicId = (url) => {
   }
 };
 
+// 🛠️ دالة مساعدة لحذف الملف القديم من Cloudinary
+const deleteOldCloudinaryFile = async (fileUrl) => {
+  const publicId = extractPublicId(fileUrl);
+  if (publicId) {
+    try {
+      await cloudinary.uploader.destroy(publicId);
+      console.log(`🗑️ Deleted old image from Cloudinary: ${publicId}`);
+    } catch (err) {
+      console.error("❌ Failed to delete old image:", err);
+    }
+  }
+};
+
 // ✅ 1. جلب جميع المشاريع (GET /api/projects)
 router.get("/", async (req, res) => {
   try {
@@ -40,6 +67,7 @@ router.get("/", async (req, res) => {
       data: results.map((p) => ({ ...p, image_url: p.image || null })),
     });
   } catch (err) {
+    console.error("❌ GET Error:", err);
     return res.status(500).json({
       success: false,
       message: "Failed to fetch projects",
@@ -49,16 +77,14 @@ router.get("/", async (req, res) => {
 });
 
 // ✅ 2. إضافة مشروع جديد (POST /api/projects)
-router.post("/", async (req, res) => {
+router.post("/", upload.single("image"), async (req, res) => {
   try {
-    const { title, description, link, technologies, status, image } = req.body;
+    const { title, description, link, technologies, status } = req.body;
     let imageUrl = null;
 
-    if (image && typeof image === "string" && image.startsWith("data:image")) {
-      const uploadRes = await cloudinary.uploader.upload(image, {
-        folder: "portfolio_uploads/projects",
-      });
-      imageUrl = uploadRes.secure_url;
+    // لو فيه صورة مرفوعة
+    if (req.file) {
+      imageUrl = req.file.path; // Cloudinary link
     }
 
     // معالجة الـ technologies لو مبعوثة كمصفوفة Array
@@ -94,10 +120,10 @@ router.post("/", async (req, res) => {
 });
 
 // ✅ 3. تحديث مشروع (PUT /api/projects/:id)
-router.put("/:id", async (req, res) => {
+router.put("/:id", upload.single("image"), async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, description, link, technologies, status, image } = req.body;
+    const { title, description, link, technologies, status } = req.body;
 
     // جلب بيانات المشروع القديمة
     const [existing] = await db.query("SELECT * FROM projects WHERE id = ?", [
@@ -112,25 +138,15 @@ router.put("/:id", async (req, res) => {
     const oldProject = existing[0];
     let newImageUrl = oldProject.image;
 
-    // إذا تم رفع صورة جديدة بصيغة Base64
-    if (image && typeof image === "string" && image.startsWith("data:image")) {
-      // 1. رفع الصورة الجديدة لـ Cloudinary
-      const uploadRes = await cloudinary.uploader.upload(image, {
-        folder: "portfolio_uploads/projects",
-      });
-      newImageUrl = uploadRes.secure_url;
-
-      // 2. مسح الصورة القديمة فوراً من Cloudinary
+    // إذا تم رفع صورة جديدة
+    if (req.file) {
+      // 1. حذف الصورة القديمة من Cloudinary
       if (oldProject.image) {
-        const publicId = extractPublicId(oldProject.image);
-        if (publicId) {
-          try {
-            await cloudinary.uploader.destroy(publicId);
-          } catch (delErr) {
-            console.error("⚠️ Could not delete old Cloudinary image:", delErr);
-          }
-        }
+        await deleteOldCloudinaryFile(oldProject.image);
       }
+
+      // 2. استخدام رابط الصورة الجديدة
+      newImageUrl = req.file.path;
     }
 
     // معالجة الـ technologies لو مبعوثة كمصفوفة
@@ -179,28 +195,27 @@ router.put("/:id", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
+
+    // جلب الصورة القديمة
     const [existing] = await db.query(
       "SELECT image FROM projects WHERE id = ?",
       [id],
     );
 
+    // حذف الصورة من Cloudinary
     if (existing.length > 0 && existing[0].image) {
-      const publicId = extractPublicId(existing[0].image);
-      if (publicId) {
-        try {
-          await cloudinary.uploader.destroy(publicId);
-        } catch (delErr) {
-          console.error("⚠️ Cloudinary Delete Error:", delErr);
-        }
-      }
+      await deleteOldCloudinaryFile(existing[0].image);
     }
 
+    // حذف المشروع من قاعدة البيانات
     await db.query("DELETE FROM projects WHERE id = ?", [id]);
+
     return res.json({
       success: true,
       message: "✅ Project deleted successfully",
     });
   } catch (err) {
+    console.error("❌ DELETE Project Error:", err);
     return res.status(500).json({
       success: false,
       message: "Failed to delete project",
