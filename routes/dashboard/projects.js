@@ -45,7 +45,7 @@ const storage = new CloudinaryStorage({
 
 const upload = multer({ storage: storage });
 
-// Middleware للتعامل مع المجموعات (سواء FormData أو JSON عادي)
+// Middleware معالجة رفع الملفات والـ JSON بمرونة
 const handleUpload = (req, res, next) => {
   const contentType = req.headers["content-type"] || "";
   if (contentType.includes("multipart/form-data")) {
@@ -106,7 +106,32 @@ router.get("/", async (req, res) => {
   }
 });
 
-// ✅ 2. إضافة مشروع جديد (POST /api/projects)
+// ✅ 2. تحديث حالة المشروع فقط مباشرة (PATCH /api/projects/:id/status)
+router.patch("/:id/status", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!status) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Status is required" });
+    }
+
+    await db.query("UPDATE projects SET status = ? WHERE id = ?", [status, id]);
+
+    return res.json({
+      success: true,
+      message: "✅ Status updated successfully",
+      status: status,
+    });
+  } catch (err) {
+    console.error("❌ Status Update Error:", err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ✅ 3. إضافة مشروع جديد (POST /api/projects)
 router.post("/", handleUpload, async (req, res) => {
   try {
     const { title, description, link, technologies, status } = req.body || {};
@@ -168,7 +193,7 @@ router.post("/", handleUpload, async (req, res) => {
   }
 });
 
-// ✅ 3. تحديث مشروع (PUT /api/projects/:id)
+// ✅ 4. تحديث كامل لمشروع (PUT /api/projects/:id)
 router.put("/:id", handleUpload, async (req, res) => {
   try {
     const { id } = req.params;
@@ -256,7 +281,7 @@ router.put("/:id", handleUpload, async (req, res) => {
   }
 });
 
-// ✅ 4. حذف مشروع (DELETE /api/projects/:id)
+// ✅ 5. حذف مشروع (DELETE /api/projects/:id)
 router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
