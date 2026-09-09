@@ -19,10 +19,14 @@ cloudinary.config({
 // ⚙️ إعداد Multer مع CloudinaryStorage
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
-  params: {
-    folder: 'portfolio_uploads',
-    allowed_formats: ['jpg', 'png', 'jpeg', 'webp', 'pdf'],
-    resource_type: 'auto',
+  params: async (req, file) => {
+    const isPdf = file.mimetype === 'application/pdf' || file.originalname.toLowerCase().endsWith('.pdf');
+    return {
+      folder: 'portfolio_uploads',
+      allowed_formats: ['jpg', 'png', 'jpeg', 'webp', 'pdf'],
+      resource_type: isPdf ? 'raw' : 'image',
+      public_id: `${Date.now()}-${file.originalname.replace(/\.[^/.]+$/, "")}`,
+    };
   },
 });
 
@@ -188,5 +192,5 @@ router.put('/', async (req, res) => {
     });
   }
 });
-// test
+
 export default router;
