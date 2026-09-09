@@ -16,16 +16,18 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET || 'frluELM6NDqKm2RaQBvEheP1oK8',
 });
 
-// ⚙️ إعداد Multer مع CloudinaryStorage
+// ⚙️ إعداد Multer مع CloudinaryStorage لتثبيت اسم الـ CV كـ Mina-Saad-CV.pdf
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: async (req, file) => {
     const isPdf = file.mimetype === 'application/pdf' || file.originalname.toLowerCase().endsWith('.pdf');
     return {
       folder: 'portfolio_uploads',
-      allowed_formats: ['jpg', 'png', 'jpeg', 'webp', 'pdf'],
+      // الـ PDF يرفع كـ raw واسمه ثابت دائماً Mina-Saad-CV.pdf
       resource_type: isPdf ? 'raw' : 'image',
-      public_id: `${Date.now()}-${file.originalname.replace(/\.[^/.]+$/, "")}`,
+      public_id: isPdf 
+        ? 'Mina-Saad-CV.pdf'
+        : `${Date.now()}-${file.originalname.replace(/\.[^/.]+$/, "")}`,
     };
   },
 });
@@ -47,8 +49,7 @@ const getPublicIdFromUrl = (url) => {
     }
 
     const fullPath = pathAfterUpload.join('/');
-    const publicId = fullPath.substring(0, fullPath.lastIndexOf('.')); // إزالة الامتداد (.jpg/.pdf)
-    return publicId;
+    return fullPath; // إرجاع المسار الكامل مع الامتداد
   } catch (error) {
     console.error('❌ Error parsing public_id:', error);
     return null;
@@ -140,10 +141,10 @@ router.post('/pdf', upload.single('pdf'), async (req, res) => {
 
     // 2. حذف الـ CV القديم من Cloudinary إن وجد
     if (oldPdfUrl) {
-      await deleteOldCloudinaryFile(oldPdfUrl, 'raw'); // الـ PDF عادة بيتعامل كـ raw أو image
+      await deleteOldCloudinaryFile(oldPdfUrl, 'raw');
     }
 
-    // 3. رابط الملف الجديد
+    // 3. رابط الملف الجديد المرفوع
     const pdfUrl = req.file.path;
 
     // 4. تحديث قاعدة البيانات
