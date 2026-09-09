@@ -16,18 +16,25 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET || 'frluELM6NDqKm2RaQBvEheP1oK8',
 });
 
-// ⚙️ إعداد Multer مع CloudinaryStorage لتثبيت اسم الـ CV كـ Mina-Saad-CV.pdf
+// ⚙️ إعداد Multer مع CloudinaryStorage للـ PDF والصور
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: async (req, file) => {
     const isPdf = file.mimetype === 'application/pdf' || file.originalname.toLowerCase().endsWith('.pdf');
+    
+    if (isPdf) {
+      return {
+        folder: 'portfolio_uploads',
+        resource_type: 'image', // رفع كـ image يسمح بفلترته واستعراضه بدون تقييد raw
+        format: 'pdf',
+        public_id: 'Mina-Saad-CV',
+      };
+    }
+
     return {
       folder: 'portfolio_uploads',
-      // الـ PDF يرفع كـ raw واسمه ثابت دائماً Mina-Saad-CV.pdf
-      resource_type: isPdf ? 'raw' : 'image',
-      public_id: isPdf 
-        ? 'Mina-Saad-CV.pdf'
-        : `${Date.now()}-${file.originalname.replace(/\.[^/.]+$/, "")}`,
+      resource_type: 'image',
+      public_id: `${Date.now()}-${file.originalname.replace(/\.[^/.]+$/, "")}`,
     };
   },
 });
@@ -42,14 +49,13 @@ const getPublicIdFromUrl = (url) => {
     const uploadIndex = parts.indexOf('upload');
     if (uploadIndex === -1) return null;
 
-    // استخراج المسار بعد مجلد upload والنسخة v123456789
     const pathAfterUpload = parts.slice(uploadIndex + 1);
     if (pathAfterUpload[0].startsWith('v')) {
-      pathAfterUpload.shift(); // حذف رقم الـ Version
+      pathAfterUpload.shift();
     }
 
     const fullPath = pathAfterUpload.join('/');
-    return fullPath; // إرجاع المسار الكامل مع الامتداد
+    return fullPath.substring(0, fullPath.lastIndexOf('.'));
   } catch (error) {
     console.error('❌ Error parsing public_id:', error);
     return null;
@@ -96,19 +102,14 @@ router.post('/image', upload.single('image'), async (req, res) => {
       return res.status(400).json({ success: false, message: 'لم يتم اختيار صورة' });
     }
 
-    // 1. جلب رابط الصورة القديمة لربطها بالحذف
     const [rows] = await db.query('SELECT image FROM information WHERE id = 1');
     const oldImageUrl = rows[0]?.image;
 
-    // 2. حذف الصورة القديمة من Cloudinary إن وجدت
     if (oldImageUrl) {
       await deleteOldCloudinaryFile(oldImageUrl, 'image');
     }
 
-    // 3. رابط الصورة الجديدة المرفوعة
     const imageUrl = req.file.path;
-
-    // 4. تحديث قاعدة البيانات
     const query = 'UPDATE information SET image = ? WHERE id = 1';
     await db.query(query, [imageUrl]);
 
@@ -135,19 +136,14 @@ router.post('/pdf', upload.single('pdf'), async (req, res) => {
       return res.status(400).json({ success: false, message: 'لم يتم اختيار ملف PDF' });
     }
 
-    // 1. جلب رابط الـ CV القديم
     const [rows] = await db.query('SELECT cv_file FROM information WHERE id = 1');
     const oldPdfUrl = rows[0]?.cv_file;
 
-    // 2. حذف الـ CV القديم من Cloudinary إن وجد
     if (oldPdfUrl) {
-      await deleteOldCloudinaryFile(oldPdfUrl, 'raw');
+      await deleteOldCloudinaryFile(oldPdfUrl, 'image');
     }
 
-    // 3. رابط الملف الجديد المرفوع
     const pdfUrl = req.file.path;
-
-    // 4. تحديث قاعدة البيانات
     const query = 'UPDATE information SET cv_file = ? WHERE id = 1';
     await db.query(query, [pdfUrl]);
 
