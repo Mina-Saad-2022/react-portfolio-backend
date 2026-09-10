@@ -44,7 +44,7 @@ router.post("/record", async (req, res) => {
           ).toLowerCase();
           let baseCity = geoData.city || "Cairo";
 
-          // 🧠 فحص شامل لأسماء شركات الإنترنت في مصر لضمان ظهورها دائمًا
+          // 🧠 فحص دقيق وشامل لشركات الإنترنت لإظهار اسم الشركة بجانب المدينة دائماً
           if (ispName.includes("vodafone")) {
             city = `${baseCity} (Vodafone)`;
           } else if (ispName.includes("orange")) {
@@ -58,7 +58,6 @@ router.post("/record", async (req, res) => {
           ) {
             city = `${baseCity} (WE)`;
           } else {
-            // لو شركة تانية، بنحط اسم الـ ISP المستخرج لو متاح عشان يظهر دايماً
             const cleanIsp = geoData.connection?.isp
               ? ` (${geoData.connection.isp.split(" ")[0]})`
               : "";
