@@ -37,23 +37,32 @@ router.post("/record", async (req, res) => {
           country = geoData.country || "Egypt";
           region = geoData.region || "Cairo";
 
-          let ispName =
-            geoData.connection?.isp || geoData.connection?.org || "";
+          let ispName = (
+            geoData.connection?.isp ||
+            geoData.connection?.org ||
+            ""
+          ).toLowerCase();
           let baseCity = geoData.city || "Cairo";
 
-          if (ispName.toLowerCase().includes("vodafone")) {
+          // 🧠 فحص شامل لأسماء شركات الإنترنت في مصر لضمان ظهورها دائمًا
+          if (ispName.includes("vodafone")) {
             city = `${baseCity} (Vodafone)`;
-          } else if (ispName.toLowerCase().includes("orange")) {
+          } else if (ispName.includes("orange")) {
             city = `${baseCity} (Orange)`;
-          } else if (ispName.toLowerCase().includes("etisalat")) {
+          } else if (ispName.includes("etisalat") || ispName.includes("eand")) {
             city = `${baseCity} (Etisalat)`;
           } else if (
-            ispName.toLowerCase().includes("we") ||
-            ispName.toLowerCase().includes("telecom egypt")
+            ispName.includes("we") ||
+            ispName.includes("telecom egypt") ||
+            ispName.includes("tedata")
           ) {
             city = `${baseCity} (WE)`;
           } else {
-            city = baseCity;
+            // لو شركة تانية، بنحط اسم الـ ISP المستخرج لو متاح عشان يظهر دايماً
+            const cleanIsp = geoData.connection?.isp
+              ? ` (${geoData.connection.isp.split(" ")[0]})`
+              : "";
+            city = `${baseCity}${cleanIsp}`;
           }
         }
       } catch (geoError) {
