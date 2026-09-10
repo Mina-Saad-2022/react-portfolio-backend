@@ -22,12 +22,12 @@ const storage = new CloudinaryStorage({
   params: async (req, file) => {
     const isPdf = file.mimetype === 'application/pdf' || file.originalname.toLowerCase().endsWith('.pdf');
     
+    // 📄 ضبط resource_type كـ raw للـ PDF لمنع خطأ 404
     if (isPdf) {
       return {
         folder: 'portfolio_uploads',
-        resource_type: 'image', // رفع كـ image يسمح بفلترته واستعراضه بدون تقييد raw
-        format: 'pdf',
-        public_id: 'Mina-Saad-CV',
+        resource_type: 'raw',
+        public_id: `Mina-Saad-CV-${Date.now()}.pdf`,
       };
     }
 
@@ -55,7 +55,7 @@ const getPublicIdFromUrl = (url) => {
     }
 
     const fullPath = pathAfterUpload.join('/');
-    return fullPath.substring(0, fullPath.lastIndexOf('.'));
+    return fullPath;
   } catch (error) {
     console.error('❌ Error parsing public_id:', error);
     return null;
@@ -63,7 +63,7 @@ const getPublicIdFromUrl = (url) => {
 };
 
 // 🛠️ دالة مساعدة لحذف الملف القديم من Cloudinary
-const deleteOldCloudinaryFile = async (fileUrl, resourceType = 'image') => {
+const deleteOldCloudinaryFile = async (fileUrl, resourceType = 'raw') => {
   const publicId = getPublicIdFromUrl(fileUrl);
   if (publicId) {
     try {
@@ -140,7 +140,7 @@ router.post('/pdf', upload.single('pdf'), async (req, res) => {
     const oldPdfUrl = rows[0]?.cv_file;
 
     if (oldPdfUrl) {
-      await deleteOldCloudinaryFile(oldPdfUrl, 'image');
+      await deleteOldCloudinaryFile(oldPdfUrl, 'raw');
     }
 
     const pdfUrl = req.file.path;
