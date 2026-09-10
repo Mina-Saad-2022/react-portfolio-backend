@@ -18,6 +18,7 @@ import skillsFrontendRoutes from "./routes/dashboard/skillsFrontend.js";
 import skillsBackendRoutes from "./routes/dashboard/skillsBackend.js";
 import experiencesRoutes from "./routes/dashboard/experiences.js";
 import projectsRoutes from "./routes/dashboard/projects.js";
+import visitsRouter from "./routes/dashboard/visits.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -30,7 +31,7 @@ app.use(
     origin: "*",
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
-  })
+  }),
 );
 
 // ✅ زيادة مساحة استقبال الـ Base64 لـ 10MB (ضروري جداً يكون هنا قبل الـ Routes)
@@ -40,20 +41,22 @@ app.use(express.urlencoded({ limit: "10mb", extended: true }));
 // ✅ خدمة الملفات الثابتة (Uploads)
 app.use(
   "/dashboard/assets/images/information",
-  express.static(path.join(__dirname, "uploads/images"))
+  express.static(path.join(__dirname, "uploads/images")),
 );
 app.use(
   "/dashboard/assets/pdf",
-  express.static(path.join(__dirname, "uploads/pdf"))
+  express.static(path.join(__dirname, "uploads/pdf")),
 );
 app.use(
   "/dashboard/assets/images/projects",
-  express.static(path.join(__dirname, "uploads/projects"))
+  express.static(path.join(__dirname, "uploads/projects")),
 );
 
 // ✅ مسار فحص حالة السيرفر (Health Check)
 app.get("/", (req, res) => {
-  res.status(200).json({ status: "success", message: "Backend Server is Running!" });
+  res
+    .status(200)
+    .json({ status: "success", message: "Backend Server is Running!" });
 });
 
 // ✅ تسجيل الـ Routes الخاصة بالـ API
@@ -64,6 +67,7 @@ app.use("/api/skills/frontend", skillsFrontendRoutes);
 app.use("/api/skills/backend", skillsBackendRoutes);
 app.use("/api/experiences", experiencesRoutes);
 app.use("/api/projects", projectsRoutes);
+app.use('/api/visits', visitsRouter);
 
 // ✅ تشغيل السيرفر محلياً
 if (process.env.NODE_ENV !== "production") {
