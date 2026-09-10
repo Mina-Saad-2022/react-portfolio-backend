@@ -6,17 +6,15 @@ import db from "../../config/db.js";
 
 const router = express.Router();
 
-// 🛠️ 1. تسجيل زيارة جديدة (تُستدعى تلقائياً من الموقع العام)
+// 🛠️ 1. تسجيل زيارة جديدة (تُستدعى تلقائياً عند فتح الموقع)
 router.post("/record", async (req, res) => {
   try {
-    // استخراج IP الزائر (سواء عبر بروكسي Vercel/Cloudflare أو مباشر)
     let ip =
       req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
     if (ip.includes(",")) {
       ip = ip.split(",")[0].trim();
     }
 
-    // إزالة البورت أو صيغة IPv6 المحلية للـ localhost
     if (ip === "::1" || ip === "::ffff:127.0.0.1") {
       ip = "127.0.0.1";
     }
@@ -24,7 +22,6 @@ router.post("/record", async (req, res) => {
     const today = new Date().toISOString().split("T")[0];
     const now = new Date();
 
-    // جلب معلومات الموقع الجغرافي من API خفيف (ip-api.com)
     let country = "Local / Unknown";
     let region = "Local";
     let city = "Local";
@@ -45,7 +42,6 @@ router.post("/record", async (req, res) => {
       }
     }
 
-    // إضافة الزيارة أو تحديث عدد الزيارات إذا كان نفس الـ IP في نفس اليوم
     const sql = `
       INSERT INTO visits (ip_address, country, region, city, visit_date, last_visit_time, visit_count)
       VALUES (?, ?, ?, ?, ?, ?, 1)
@@ -95,18 +91,15 @@ router.get("/stats", async (req, res) => {
   try {
     const today = new Date().toISOString().split("T")[0];
 
-    // زوار اليوم
     const [todayRows] = await db.query(
       "SELECT COUNT(*) AS todayVisitors FROM visits WHERE visit_date = ?",
       [today],
     );
 
-    // زوار الأسبوع (آخر 7 أيام)
     const [weekRows] = await db.query(
       "SELECT COUNT(*) AS weekVisitors FROM visits WHERE visit_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)",
     );
 
-    // قائمة آخر الزيارات للإشعارات (زيارات اليوم فقط)
     const [notificationsRows] = await db.query(
       "SELECT * FROM visits WHERE visit_date = ? ORDER BY last_visit_time DESC LIMIT 10",
       [today],
